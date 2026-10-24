@@ -203,3 +203,42 @@ git -C "windows" push origin main
    - Kindle formatındaki e-kitapların da doğrudan açılabilmesi.
 4. **Gelişmiş Yer İmi Yedekleme:**
    - Yer imlerini ve okuma konumlarını JSON / TXT olarak dışa aktarıp başka bir bilgisayara aktarabilme.
+
+---
+
+## 11. KURULUM (SETUP / INSTALLER) SİSTEMİ VE YAYIMCI MİMARİSİ
+
+### 11.1 Neden Kurulum Programı Hazırlandı?
+1. **Windows SmartScreen ve Defender Koruması:** Tekil ve sıkıştırılmış `.exe` dosyaları internetten indiğinde Windows tarafından her çalıştırmada "tanınmayan dosya" veya "geçici klasöre kod açan dosya (dropper)" olarak algılanabiliyordu.
+2. **Kalıcı Yerel Kurulum:** Kurulum programı dosyaları Windows'un resmi kullanıcı dizinine (`AppData\Local\Programs\ErisilebilirKitapOkuyucu`) sabitler. Masaüstündeki kısayol bu yerel konumu çalıştırdığı için Windows işletim sistemi uygulamayı güvenli yerel yazılım olarak çalıştırır.
+3. **Resmi Yayımcı Bilgisi:** Dosya özelliklerinde ve Windows Denetim Masası'nda yayımcı olarak **`omergoktas.net`** görünür.
+
+### 11.2 Kurulum Mimarisi (Setup.cs)
+- **Kaynak Dosya:** `windows/installer/Setup.cs`
+- **Bildirim (Manifest):** `windows/installer/setup.manifest` (`asInvoker` seviyesi — yönetici izni/UAC gerektirmez).
+- **Yayımcı:** `omergoktas.net`
+- **Hedef Dizin:** `%LocalAppData%\Programs\ErisilebilirKitapOkuyucu\`
+- **Kısayollar:**
+  - Masaüstü: `Erisilebilir Kitap Okuyucu.lnk`
+  - Başlat Menüsü: `Programs\Erisilebilir Kitap Okuyucu\Erisilebilir Kitap Okuyucu.lnk`
+- **Kayıt Defteri (Uninstall):**
+  `HKCU\Software\Microsoft\Windows\CurrentVersion\Uninstall\ErisilebilirKitapOkuyucu`
+
+### 11.3 Yeni Güncellemede Kurulum Paketini Yeniden Derleme Adımları
+Gelecekte yeni bir sürüm çıktığında kurulum programını tek komutla oluşturmak için:
+```powershell
+# 1. Temiz klasör çıktısı al
+& "$env:USERPROFILE\.dotnet\dotnet.exe" publish "windows\ErisilebilirKitapOkuyucu.Windows\ErisilebilirKitapOkuyucu.Windows.csproj" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false -o "windows\publish_folder"
+
+# 2. payload.zip oluştur
+Compress-Archive -Path "windows\publish_folder\*" -DestinationPath "windows\installer\payload.zip" -Force
+
+# 3. Setup.exe derle
+& "C:\Windows\Microsoft.NET\Framework64\v4.0.30319\csc.exe" /target:winexe /out:"windows\installer\ErisilebilirKitapOkuyucu_Kurulum.exe" /win32manifest:"windows\installer\setup.manifest" /resource:"windows\installer\payload.zip",payload.zip /r:System.Windows.Forms.dll,System.Drawing.dll,System.IO.Compression.dll,System.IO.Compression.FileSystem.dll,Microsoft.CSharp.dll "windows\installer\Setup.cs"
+```
+
+### 11.4 Yayınlanan Dağıtım Dosyaları (GitHub Release v1.0.0)
+1. **`ErisilebilirKitapOkuyucu_Kurulum.exe` (74.4 MB):** Resmi kurulum sihirbazı (Tavsiye edilen).
+2. **`ErisilebilirKitapOkuyucu_v1.0.0.zip` (70.9 MB):** Tarayıcıların indirmesini engellemediği temiz klasör arşivi.
+3. **`ErisilebilirKitapOkuyucu.exe` (72.6 MB):** Tek dosya taşınabilir sürüm.
+
