@@ -15,7 +15,12 @@
     <FileVersion>1.0.0.0</FileVersion>
     <AssemblyTitle>Erişilebilir Kitap Okuyucu</AssemblyTitle>
     <Product>Erişilebilir Kitap Okuyucu</Product>
+    <Company>Ömer Göktaş</Company>
+    <Authors>Ömer Göktaş</Authors>
+    <Copyright>Copyright © 2026 Ömer Göktaş</Copyright>
     <Description>Ekran okuyucu uyumlu sesli kitap ve belge okuyucu</Description>
+    <PackageProjectUrl>https://omergoktas.net</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/omer95goktas/Erisilebilir-Kitap-Okuyucu</RepositoryUrl>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <SatelliteResourceLanguages>en;tr</SatelliteResourceLanguages>
     <NoWarn>$(NoWarn);CA1416;NU1701</NoWarn>
