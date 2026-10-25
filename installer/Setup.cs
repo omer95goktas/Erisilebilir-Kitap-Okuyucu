@@ -80,21 +80,8 @@ namespace ErisilebilirKitapOkuyucu.Setup
             }
             catch { }
 
-            // 2. Kısayolları sil
-            try
-            {
-                string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-                string lnk1 = Path.Combine(desktop, "Erişilebilir Kitap Okuyucu.lnk");
-                if (File.Exists(lnk1)) File.Delete(lnk1);
-
-                string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-                string oneDriveLnk = Path.Combine(userProfile, "OneDrive", "Desktop", "Erişilebilir Kitap Okuyucu.lnk");
-                if (File.Exists(oneDriveLnk)) File.Delete(oneDriveLnk);
-
-                string startMenu = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Erişilebilir Kitap Okuyucu");
-                if (Directory.Exists(startMenu)) Directory.Delete(startMenu, true);
-            }
-            catch { }
+            // 2. Kısayolları sil (Tüm masaüstü konumları ve eski isim varyasyonları)
+            CleanAllShortcuts();
 
             // 3. Denetim Masası Kayıt Defteri Girişini Sil
             try
@@ -124,6 +111,48 @@ namespace ErisilebilirKitapOkuyucu.Setup
                     "Kaldırma Tamamlandı",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Information);
+            }
+        }
+
+        public static void CleanAllShortcuts()
+        {
+            string[] names = new string[] {
+                "Erişilebilir Kitap Okuyucu.lnk",
+                "Erisilebilir Kitap Okuyucu.lnk"
+            };
+
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string[] dirs = new string[] {
+                Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+                Path.Combine(userProfile, "Desktop"),
+                Path.Combine(userProfile, "OneDrive", "Desktop")
+            };
+
+            foreach (var d in dirs)
+            {
+                if (Directory.Exists(d))
+                {
+                    foreach (var n in names)
+                    {
+                        string target = Path.Combine(d, n);
+                        if (File.Exists(target))
+                        {
+                            try { File.Delete(target); } catch { }
+                        }
+                    }
+                }
+            }
+
+            // Başlat menüsü
+            string startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Erişilebilir Kitap Okuyucu");
+            if (Directory.Exists(startMenuDir))
+            {
+                try { Directory.Delete(startMenuDir, true); } catch { }
+            }
+            string startMenuOldDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Erisilebilir Kitap Okuyucu");
+            if (Directory.Exists(startMenuOldDir))
+            {
+                try { Directory.Delete(startMenuOldDir, true); } catch { }
             }
         }
     }
@@ -288,24 +317,19 @@ namespace ErisilebilirKitapOkuyucu.Setup
             }
             catch { }
 
-            // Masaüstü kısayolu
-            string desktopDir = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-            CreateShortcut(Path.Combine(desktopDir, "Erişilebilir Kitap Okuyucu.lnk"), exePath, installDir);
+            // 1. Önce TÜM eski kısayol varyasyonlarını (ASCII/Türkçe, Desktop/OneDrive) temizle
+            Program.CleanAllShortcuts();
 
-            // OneDrive Masaüstü kısayolu
-            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            string oneDriveDesktop = Path.Combine(userProfile, "OneDrive", "Desktop");
-            if (Directory.Exists(oneDriveDesktop))
-            {
-                CreateShortcut(Path.Combine(oneDriveDesktop, "Erişilebilir Kitap Okuyucu.lnk"), exePath, installDir);
-            }
+            // 2. Yalnızca TEK bir geçerli masaüstü kısayolu oluştur
+            string activeDesktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            CreateShortcut(Path.Combine(activeDesktop, "Erişilebilir Kitap Okuyucu.lnk"), exePath, installDir);
 
-            // Başlat Menüsü kısayolu
+            // 3. Başlat Menüsü kısayolu oluştur
             string startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Erişilebilir Kitap Okuyucu");
             if (!Directory.Exists(startMenuDir)) Directory.CreateDirectory(startMenuDir);
             CreateShortcut(Path.Combine(startMenuDir, "Erişilebilir Kitap Okuyucu.lnk"), exePath, installDir);
 
-            // Program Ekle/Kaldır (Denetim Masası) Kaydı
+            // 4. Program Ekle/Kaldır (Denetim Masası) Kaydı
             try
             {
                 using (var key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\ErisilebilirKitapOkuyucu"))
