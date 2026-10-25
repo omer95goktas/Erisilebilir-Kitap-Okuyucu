@@ -381,19 +381,20 @@ public sealed class HelpDialog : DialogBase
 <h2>Belge ve Kitap Okuyucu</h2>
 <ul>
   <li><strong>Yukarı / Aşağı Ok Tuşları:</strong> Satır satır okuma</li>
+  <li><strong>Ctrl + Yukarı Ok / Ctrl + Aşağı Ok:</strong> Önceki veya sonraki paragrafa git ve odaklan</li>
   <li><strong>Sol / Sağ Ok Tuşları:</strong> Karakter veya kelime gezinmesi</li>
   <li><strong>Enter:</strong> Yalnızca imlecin üzerinde bulunduğu satırı seslendir</li>
   <li><strong>Ctrl + C:</strong> Bulunulan satırın metnini panoya kopyala</li>
   <li><strong>Ctrl + Enter:</strong> Bulunulan satırdan itibaren sürekli sesli okumayı başlat</li>
   <li><strong>Boşluk Tuşu:</strong> Sayfayı sesli okumayı başlat veya duraklat</li>
   <li><strong>Ctrl + Sağ Ok / Ctrl + Sol Ok:</strong> Sonraki veya önceki sayfaya geç</li>
-  <li><strong>Alt + Sağ Ok / Alt + Sol Ok:</strong> Sonraki veya önceki cümleye atla</li>
+  <li><strong>Alt + Sağ Ok / Alt + Sol Ok:</strong> Sonraki veya önceki parçaya / cümleye atla</li>
   <li><strong>Ctrl + G:</strong> Sayfa numarası yazarak doğrudan sayfaya git</li>
   <li><strong>Ctrl + F:</strong> Belge içinde kelime / metin ara</li>
   <li><strong>Ctrl + B:</strong> Bulunulan konuma yer imi ekle</li>
   <li><strong>Ctrl + Shift + B:</strong> Kayıtlı yer imlerini listele</li>
   <li><strong>Ctrl + E:</strong> Seçili sayfaları ses (WAV) dosyasına aktar</li>
-  <li><strong>Ctrl + Yukarı Ok / Ctrl + Aşağı Ok:</strong> Sesli okuma hızını artır veya azalt</li>
+  <li><strong>Ctrl + Shift + Yukarı / Aşağı Ok:</strong> Sesli okuma hızını artır veya azalt</li>
 </ul>
 
 <h2>Sesli Kitap Oynatıcı</h2>
@@ -407,9 +408,17 @@ public sealed class HelpDialog : DialogBase
   <li><strong>Shift + Yukarı Ok / Shift + Aşağı Ok:</strong> Ses düzeyini artır veya azalt</li>
 </ul>
 
+<h2>Ses Motorları ve Yasal Sorumluluk Bildirimi</h2>
+<p style=""font-size:14px; color:#333;"">
+  Uygulama; tamamen yerel ve internetsiz çalışan açık kaynak nöral yapay zeka sesi (Piper Fahrettin), sistem sesleri (Windows OneCore ve SAPI 5) ile çevrim içi doğal sesleri (Microsoft Emel ve isteğe bağlı kişisel API ile Google Cloud) destekler.
+</p>
+<p style=""font-size:14px; color:#333;"">
+  <strong>Üçüncü Taraf Servisler ve API Sorumluluk Reddi:</strong> Uygulama içerisinde kullanıcı tarafından isteğe bağlı olarak girilen Google Cloud ve benzeri üçüncü taraf API anahtarları tamamen kullanıcının kendi sorumluluğundadır. İlgili servis sağlayıcıları tarafından belirlenen kotaların aşılması veya faturalandırma sebebiyle doğabilecek hiçbir maddi borç, ücret veya mali yükümlülükten uygulama geliştiricisi (Ömer Göktaş) sorumlu tutulamaz. Girilen API anahtarları hiçbir harici sunucuya iletilmez, yalnızca kullanıcının kendi bilgisayarında yerel olarak saklanır.
+</p>
+
 <h2>Geliştirici ve İletişim</h2>
 <ul>
-  <li><strong>Uygulama:</strong> Erişilebilir Kitap Okuyucu (Windows v1.0.0)</li>
+  <li><strong>Uygulama:</strong> Erişilebilir Kitap Okuyucu (Windows v1.0.1 Test Sürümü)</li>
   <li><strong>Geliştirici:</strong> Ömer Göktaş</li>
   <li><strong>E-Posta:</strong> mail@omergoktas.net</li>
   <li><strong>Web Sitesi:</strong> https://omergoktas.net</li>

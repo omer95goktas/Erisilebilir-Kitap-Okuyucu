@@ -95,6 +95,10 @@ public class AppSettings
     public int SeekIntervalSeconds { get; set; } = 15;
     public string PageTurnVoice { get; set; } = "Varsayılan";
     public bool PlayPageTurnSoundOnTtsNextPage { get; set; }
+    /// <summary>"Cümle" veya "Paragraf".</summary>
+    public string TtsReadMode { get; set; } = "Cümle";
+    /// <summary>Kullanıcının kendi Google Cloud Text-to-Speech API anahtarı.</summary>
+    public string? GoogleApiKey { get; set; }
 }
 
 public record SearchResult(int Page, int LineIndex, string Snippet)

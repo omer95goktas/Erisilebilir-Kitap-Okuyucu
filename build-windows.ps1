@@ -56,6 +56,15 @@ if (Test-Path $publishFolder) { Remove-Item -Path $publishFolder -Recurse -Force
     -p:PublishSingleFile=false -p:DebugType=None -p:DebugSymbols=false -o $publishFolder
 if ($LASTEXITCODE -ne 0) { throw ".NET Publish başarısız oldu." }
 
+# Çevrim dışı yapay zeka ses modelini (Piper / Fahrettin FP32) dağıtım paketine dahil et
+$sourceModels = "C:\Users\gokta\.gemini\antigravity\scratch\models"
+$destModels = Join-Path $publishFolder "models"
+if (Test-Path $sourceModels) {
+    Write-Host "Çevrim dışı yüksek kaliteli ses modeli (Fahrettin FP32) kopyalanıyor..." -ForegroundColor Cyan
+    New-Item -ItemType Directory -Path $destModels -Force | Out-Null
+    Copy-Item (Join-Path $sourceModels "vits-piper-tr_TR-fahrettin-medium") $destModels -Recurse -Force
+}
+
 # 4. payload.zip Oluştur
 Write-Host "[2/4] Uygulama paketi (payload.zip) sıkıştırılıyor..." -ForegroundColor Yellow
 $payloadZip = Join-Path $installerDir "payload.zip"

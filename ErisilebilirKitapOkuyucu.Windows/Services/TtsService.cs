@@ -52,22 +52,41 @@ public sealed class TtsService : IDisposable
         }
     }
 
-    /// <summary>Metni cümlelere böler; her cümlenin özgün metindeki konumunu da döndürür (vurgulama için).</summary>
-    public static List<Sentence> Split(string text)
+    /// <summary>Metni cümlelere veya paragraflara böler; her parçanın özgün metindeki konumunu da döndürür.</summary>
+    public static List<Sentence> Split(string text) => Split(text, false);
+
+    public static List<Sentence> Split(string text, bool paragraphMode)
     {
         var result = new List<Sentence>();
         if (string.IsNullOrWhiteSpace(text)) return result;
-        int pos = 0;
+
+        if (paragraphMode)
+        {
+            int pos = 0;
+            var paras = Regex.Matches(text, @"[^\r\n]+(?:\r?\n(?!\r?\n)[^\r\n]+)*");
+            foreach (Match p in paras)
+            {
+                var clean = p.Value.Trim();
+                if (clean.Length == 0) continue;
+                var idx = text.IndexOf(clean, pos, StringComparison.Ordinal);
+                if (idx < 0) idx = pos;
+                result.Add(new Sentence(clean, idx, clean.Length));
+                pos = idx + clean.Length;
+            }
+            return result.Count > 0 ? result : new List<Sentence> { new(text.Trim(), 0, text.Trim().Length) };
+        }
+
+        int posSentence = 0;
         foreach (Match para in Regex.Matches(text, @"[^\n]+(?:\n(?!\n)[^\n]*)*"))
         {
             foreach (var part in Regex.Split(para.Value, @"(?<=[.!?…])\s+"))
             {
                 var clean = part.Trim();
                 if (clean.Length == 0) continue;
-                var idx = text.IndexOf(clean, pos, StringComparison.Ordinal);
-                if (idx < 0) idx = pos;
+                var idx = text.IndexOf(clean, posSentence, StringComparison.Ordinal);
+                if (idx < 0) idx = posSentence;
                 result.Add(new Sentence(clean, idx, clean.Length));
-                pos = idx + clean.Length;
+                posSentence = idx + clean.Length;
             }
         }
         return result;
@@ -76,7 +95,8 @@ public sealed class TtsService : IDisposable
     public void LoadPageText(string text, int startIndex = 0)
     {
         Stop();
-        _sentences = Split(text);
+        bool isParagraph = _repo.Settings.TtsReadMode == "Paragraf";
+        _sentences = Split(text, isParagraph);
         CurrentIndex = Math.Clamp(startIndex, 0, Math.Max(0, _sentences.Count - 1));
     }
 
@@ -117,6 +137,14 @@ public sealed class TtsService : IDisposable
             if (gen != _generation) return;
             CurrentIndex = i;
             SentenceChanged?.Invoke(i);
+
+            // Sonraki cümleyi arka planda önceden getir (çevrim içi seslerde cümleler arası sıfır gecikme)
+            if (i + 1 < _sentences.Count)
+            {
+                var nextText = _sentences[i + 1].Text;
+                _ = engine.PreFetchAsync(nextText, voice, s.TtsSpeechRate, s.TtsPitch, cts.Token);
+            }
+
             try
             {
                 await engine.SpeakAsync(_sentences[i].Text, voice, s.TtsSpeechRate, s.TtsPitch, cts.Token);

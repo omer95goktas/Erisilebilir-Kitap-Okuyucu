@@ -11,3 +11,11 @@ publish/
 # Build / Test outputs
 *.log
 selftest_report.txt
+
+# Generated installers and build payloads
+publish_folder/
+installer/payload.zip
+installer/ErisilebilirKitapOkuyucu_Kurulum.exe
+ErisilebilirKitapOkuyucu.exe
+ErisilebilirKitapOkuyucu_Kurulum.exe
+release_artifacts/

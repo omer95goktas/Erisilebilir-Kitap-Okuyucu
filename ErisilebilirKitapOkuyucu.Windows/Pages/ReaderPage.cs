@@ -39,7 +39,7 @@ public sealed class ReaderPage : PageBase
         SpellCheck = { IsEnabled = false }
     };
 
-    private readonly Button _play, _prevPage, _nextPage;
+    private readonly Button _play, _prevPage, _nextPage, _btnReadMode;
     private readonly TextBox _gotoBox = new() { Width = 90 };
     private readonly Slider _rate = new() { Minimum = 0.5, Maximum = 3.0, SmallChange = 0.1, LargeChange = 0.5, TickFrequency = 0.1, IsSnapToTickEnabled = true, MinWidth = 200 };
     private readonly Slider _pitch = new() { Minimum = 0.5, Maximum = 2.0, SmallChange = 0.1, LargeChange = 0.5, TickFrequency = 0.1, IsSnapToTickEnabled = true, MinWidth = 200 };
@@ -66,17 +66,20 @@ public sealed class ReaderPage : PageBase
         _prevPage = Ui.Button("Önceki Sayfa", () => Step(-1), "Ctrl+Sol ok");
         _play = Ui.Button("Oku", ToggleTts, "Boşluk tuşu. Sayfayı sesli okumayı başlatır veya duraklatır", "Oku");
         _nextPage = Ui.Button("Sonraki Sayfa", () => Step(1), "Ctrl+Sağ ok");
+        _btnReadMode = Ui.Button($"Okuma Modu: {App.Repo.Settings.TtsReadMode}", ToggleReadMode, "Cümle veya Paragraf bazlı okuma arasında geçiş yapar");
 
         var nav = new WrapPanel();
         nav.Children.Add(_prevPage); nav.Children.Add(_play);
         nav.Children.Add(Ui.Button("Durdur", () => { App.Tts.Stop(); App.Announce("Durduruldu"); }));
         nav.Children.Add(_nextPage);
-        nav.Children.Add(Ui.Button("Önceki Cümle", () => App.Tts.PreviousSentence(), "Alt+Sol ok"));
-        nav.Children.Add(Ui.Button("Sonraki Cümle", () => App.Tts.NextSentence(), "Alt+Sağ ok"));
+        nav.Children.Add(Ui.Button("Önceki Parça", () => App.Tts.PreviousSentence(), "Alt+Sol ok"));
+        nav.Children.Add(Ui.Button("Sonraki Parça", () => App.Tts.NextSentence(), "Alt+Sağ ok"));
 
-        // Satır / İmleç İşlemleri Düğmeleri (Metin kutusundan hemen sonra Tab ile gelir)
+        // Satır / Paragraf / İmleç İşlemleri Düğmeleri (Metin kutusundan hemen sonra Tab ile gelir)
         var lineTools = new WrapPanel();
+        lineTools.Children.Add(Ui.Button("Önceki Paragraf", GoPreviousParagraph, "Ctrl+Yukarı ok"));
         lineTools.Children.Add(Ui.Button("Bulunulan Satırı Seslendir", SpeakCurrentLine, "Enter tuşu"));
+        lineTools.Children.Add(Ui.Button("Sonraki Paragraf", GoNextParagraph, "Ctrl+Aşağı ok"));
         lineTools.Children.Add(Ui.Button("Bulunulan Satırı Kopyala", CopyCurrentLine, "Control C"));
         lineTools.Children.Add(Ui.Button("Bulunulan Satıra Yer İmi Ekle", AddBookmark, "Control B"));
         lineTools.Children.Add(Ui.Button("Buradan Okumaya Başla", ReadFromCurrentLine, "Control Enter"));
@@ -104,6 +107,7 @@ public sealed class ReaderPage : PageBase
         _restartTimer.Tick += (_, _) => { _restartTimer.Stop(); if (App.Tts.IsSpeaking) App.Tts.StartSpeaking(App.Tts.CurrentIndex); };
 
         var tools = new WrapPanel();
+        tools.Children.Add(_btnReadMode);
         tools.Children.Add(Ui.Button("Belgede Ara", Search, "Ctrl+F"));
         tools.Children.Add(Ui.Button("Yer İmleri", ShowBookmarks, "Ctrl+Shift+B"));
         tools.Children.Add(Ui.Button("Sesi Dosyaya Aktar", Export, "Ctrl+E"));
@@ -184,6 +188,7 @@ public sealed class ReaderPage : PageBase
             await ShowPage(_page, autoPlay: false, announce: false);
             Host.SetStatus($"{_book.Title}, sayfa {_page} / {_doc.TotalPages}");
             App.Announce($"{_book.Title} açıldı. Sayfa {_page} / {_doc.TotalPages}. Yön tuşlarıyla metni okuyabilir, sesli okumayı başlatmak için boşluk tuşuna basabilirsiniz.");
+            if (App.Tts.ActiveEngine is EdgeTtsEngine edgeReader) edgeReader.PreWarm();
             FocusTextAt(0);
         }
         catch (Exception e)
@@ -305,10 +310,98 @@ public sealed class ReaderPage : PageBase
         App.Announce("Bu satırdan itibaren sesli okuma başlatıldı");
     }
 
+    private void GoNextParagraph()
+    {
+        if (string.IsNullOrEmpty(_text.Text)) return;
+        int caret = _text.CaretIndex;
+        string text = _text.Text;
+
+        int nextLine = text.IndexOf('\n', caret);
+        if (nextLine >= 0)
+        {
+            int target = nextLine + 1;
+            while (target < text.Length && (text[target] == '\r' || text[target] == '\n'))
+                target++;
+
+            if (target < text.Length)
+            {
+                FocusTextAt(target);
+                var (para, _, _) = GetCurrentLineOrSelection();
+                if (!string.IsNullOrWhiteSpace(para))
+                    App.Announce(para.Length > 80 ? para[..80] + "…" : para);
+                return;
+            }
+        }
+
+        if (_doc != null && _page < _doc.TotalPages)
+        {
+            Step(1);
+            App.Announce("Sonraki sayfaya geçildi");
+        }
+        else
+        {
+            App.Announce("Kitabın sonundasınız");
+        }
+    }
+
+    private void GoPreviousParagraph()
+    {
+        if (string.IsNullOrEmpty(_text.Text)) return;
+        int caret = _text.CaretIndex;
+        string text = _text.Text;
+
+        if (caret <= 0)
+        {
+            if (_doc != null && _page > 1)
+            {
+                Step(-1);
+                App.Announce("Önceki sayfaya geçildi");
+            }
+            else
+            {
+                App.Announce("İlk sayfadasınız");
+            }
+            return;
+        }
+
+        int prevLine = text.LastIndexOf('\n', Math.Max(0, caret - 2));
+        if (prevLine >= 0)
+        {
+            int start = text.LastIndexOf('\n', prevLine - 1);
+            int target = start < 0 ? 0 : start + 1;
+            while (target < text.Length && (text[target] == '\r' || text[target] == '\n'))
+                target++;
+
+            FocusTextAt(target);
+            var (para, _, _) = GetCurrentLineOrSelection();
+            if (!string.IsNullOrWhiteSpace(para))
+                App.Announce(para.Length > 80 ? para[..80] + "…" : para);
+            return;
+        }
+
+        FocusTextAt(0);
+        var (firstPara, _, _) = GetCurrentLineOrSelection();
+        if (!string.IsNullOrWhiteSpace(firstPara))
+            App.Announce(firstPara.Length > 80 ? firstPara[..80] + "…" : firstPara);
+    }
+
+    private void ToggleReadMode()
+    {
+        var s = App.Repo.Settings;
+        s.TtsReadMode = s.TtsReadMode == "Paragraf" ? "Cümle" : "Paragraf";
+        App.Repo.UpdateSettings(s);
+        _btnReadMode.Content = $"Okuma Modu: {s.TtsReadMode}";
+        Ui.Name(_btnReadMode, $"Okuma Modu: {s.TtsReadMode}");
+        App.Tts.LoadPageText(_text.Text, 0);
+        App.Announce($"Okuma modu {s.TtsReadMode} olarak ayarlandı");
+    }
+
     private ContextMenu BuildContextMenu()
     {
         var m = new ContextMenu();
         void Add(string h, Action a) { var i = new MenuItem { Header = h }; i.Click += (_, _) => a(); m.Items.Add(i); }
+        Add("Önceki Paragraf (Ctrl+Yukarı Ok)", GoPreviousParagraph);
+        Add("Sonraki Paragraf (Ctrl+Aşağı Ok)", GoNextParagraph);
         Add("Bulunulan Satırı Seslendir (Enter)", SpeakCurrentLine);
         Add("Bulunulan Satırı Kopyala (Ctrl+C)", CopyCurrentLine);
         Add("Bulunulan Satıra Yer İmi Ekle (Ctrl+B)", AddBookmark);
@@ -321,6 +414,22 @@ public sealed class ReaderPage : PageBase
     private void OnTextPreviewKeyDown(object sender, KeyEventArgs e)
     {
         var mods = Keyboard.Modifiers;
+
+        // Ctrl + Aşağı ok: Sonraki paragrafa geç
+        if (e.Key == Key.Down && mods == ModifierKeys.Control)
+        {
+            GoNextParagraph();
+            e.Handled = true;
+            return;
+        }
+
+        // Ctrl + Yukarı ok: Önceki paragrafa geç
+        if (e.Key == Key.Up && mods == ModifierKeys.Control)
+        {
+            GoPreviousParagraph();
+            e.Handled = true;
+            return;
+        }
 
         // Enter: Yalnızca bulunulan satırı seslendir
         if (e.Key == Key.Enter && mods == ModifierKeys.None)
@@ -479,48 +588,62 @@ public sealed class ReaderPage : PageBase
 
     private void OnSpeakingChanged()
     {
-        var speaking = App.Tts.IsSpeaking;
-        _play.Content = speaking ? "Duraklat" : (App.Tts.CurrentIndex > 0 ? "Devam Et" : "Oku");
-        Ui.Name(_play, speaking ? "Duraklat" : (App.Tts.CurrentIndex > 0 ? "Devam Et" : "Oku"));
+        Dispatcher.InvokeAsync(() =>
+        {
+            var speaking = App.Tts.IsSpeaking;
+            if (!speaking && _text.SelectionLength > 0)
+            {
+                _text.CaretIndex = _text.SelectionStart;
+            }
+            _play.Content = speaking ? "Duraklat" : (App.Tts.CurrentIndex > 0 ? "Devam Et" : "Oku");
+            Ui.Name(_play, speaking ? "Duraklat" : (App.Tts.CurrentIndex > 0 ? "Devam Et" : "Oku"));
+        });
     }
 
     private void OnSentenceChanged(int index)
     {
-        if (index < 0 || index >= App.Tts.Sentences.Count) return;
-        var s = App.Tts.Sentences[index];
-        if (s.Start >= 0 && s.Start + s.Length <= _text.Text.Length)
+        Dispatcher.InvokeAsync(() =>
         {
-            _text.Select(s.Start, s.Length);
-            // İmleci de güncelle ki kullanıcı durdurduğunda tam oradan devam edebilsin
-            _text.CaretIndex = s.Start;
-        }
+            if (index < 0 || index >= App.Tts.Sentences.Count) return;
+            var s = App.Tts.Sentences[index];
+            if (s.Start >= 0 && s.Start + s.Length <= _text.Text.Length)
+            {
+                _text.Select(s.Start, s.Length);
+            }
+        });
     }
 
-    private async void OnPageCompleted()
+    private void OnPageCompleted()
     {
-        if (_doc == null) return;
-        var s = App.Repo.Settings;
-        if (s.AutoNextPage && _page < _doc.TotalPages)
+        Dispatcher.InvokeAsync(async () =>
         {
-            var token = _loadToken;
-            if (s.PlayPageTurnSoundOnTtsNextPage && s.PageTurnVoice != "Kapalı")
+            if (_doc == null) return;
+            var s = App.Repo.Settings;
+            if (s.AutoNextPage && _page < _doc.TotalPages)
             {
-                PageTurnSounds.Play(s.PageTurnVoice, true);
-                await Task.Delay(PageTurnSounds.DelayMs(s.PageTurnVoice));
-                if (token != _loadToken) return;
+                var token = _loadToken;
+                if (s.PlayPageTurnSoundOnTtsNextPage && s.PageTurnVoice != "Kapalı")
+                {
+                    PageTurnSounds.Play(s.PageTurnVoice, true);
+                    await Task.Delay(PageTurnSounds.DelayMs(s.PageTurnVoice));
+                    if (token != _loadToken) return;
+                }
+                await ShowPage(_page + 1, autoPlay: true, announce: false);
             }
-            await ShowPage(_page + 1, autoPlay: true, announce: false);
-        }
-        else if (_page >= _doc.TotalPages)
-        {
-            Host.SetStatus("Kitabın sonuna gelindi.", true);
-        }
+            else if (_page >= _doc.TotalPages)
+            {
+                Host.SetStatus("Kitabın sonuna gelindi.", true);
+            }
+        });
     }
 
     private void OnTtsError(string message)
     {
-        Host.SetStatus(message, true);
-        MessageBox.Show(Host, message, "Konuşma hatası", MessageBoxButton.OK, MessageBoxImage.Warning);
+        Dispatcher.InvokeAsync(() =>
+        {
+            Host.SetStatus(message, true);
+            MessageBox.Show(Host, message, "Konuşma hatası", MessageBoxButton.OK, MessageBoxImage.Warning);
+        });
     }
 
     private void OnKey(object sender, KeyEventArgs e)
@@ -535,15 +658,20 @@ public sealed class ReaderPage : PageBase
             {
                 case Key.Right: Step(1); e.Handled = true; return;
                 case Key.Left: Step(-1); e.Handled = true; return;
+                case Key.Up: GoPreviousParagraph(); e.Handled = true; return;
+                case Key.Down: GoNextParagraph(); e.Handled = true; return;
                 case Key.G: _gotoBox.Focus(); _gotoBox.SelectAll(); e.Handled = true; return;
                 case Key.F: Search(); e.Handled = true; return;
                 case Key.B: AddBookmark(); e.Handled = true; return;
                 case Key.E: Export(); e.Handled = true; return;
-                case Key.Up: _rate.Value = Math.Min(3.0, _rate.Value + 0.1); App.Announce($"Hız {_rate.Value:0.0}"); e.Handled = true; return;
-                case Key.Down: _rate.Value = Math.Max(0.5, _rate.Value - 0.1); App.Announce($"Hız {_rate.Value:0.0}"); e.Handled = true; return;
             }
         }
-        else if (mods == (ModifierKeys.Control | ModifierKeys.Shift) && key == Key.B) { ShowBookmarks(); e.Handled = true; return; }
+        else if (mods == (ModifierKeys.Control | ModifierKeys.Shift))
+        {
+            if (key == Key.B) { ShowBookmarks(); e.Handled = true; return; }
+            if (key == Key.Up) { _rate.Value = Math.Min(3.0, _rate.Value + 0.1); App.Announce($"Hız {_rate.Value:0.0}"); e.Handled = true; return; }
+            if (key == Key.Down) { _rate.Value = Math.Max(0.5, _rate.Value - 0.1); App.Announce($"Hız {_rate.Value:0.0}"); e.Handled = true; return; }
+        }
         else if (mods == ModifierKeys.Alt)
         {
             if (key == Key.Right) { App.Tts.NextSentence(); e.Handled = true; return; }

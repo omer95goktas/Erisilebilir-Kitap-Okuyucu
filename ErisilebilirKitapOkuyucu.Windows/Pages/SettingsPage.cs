@@ -56,10 +56,82 @@ public sealed class SettingsPage : PageBase
         ttsGroup.Content = tts;
         stack.Children.Add(ttsGroup);
 
+        // ---- Google Cloud TTS API Anahtarı ve Yasal Sorumluluk Bildirimi
+        var googleGroup = new GroupBox { Header = "Google Cloud Seslendirme (İsteğe Bağlı)" };
+        Ui.Name(googleGroup, "Google Cloud Seslendirme");
+        var gPanel = new StackPanel();
+
+        bool hasKey = !string.IsNullOrWhiteSpace(s.GoogleApiKey);
+        var keyStatusText = Ui.Text(hasKey ? "Google Cloud API Anahtarı: Kayıtlı ve aktif" : "Google Cloud API Anahtarı: Henüz tanımlanmamış");
+        gPanel.Children.Add(keyStatusText);
+
+        var keyInputContainer = new StackPanel { Visibility = hasKey ? Visibility.Collapsed : Visibility.Visible, Margin = new Thickness(0, 4, 0, 4) };
+        var apiBox = new PasswordBox
+        {
+            Password = s.GoogleApiKey ?? "",
+            Margin = new Thickness(0, 4, 0, 6),
+            Padding = new Thickness(6, 4, 6, 4),
+            FontSize = 14
+        };
+        Ui.Name(apiBox, "Google Cloud API Anahtarı Giriş Alanı");
+
+        var saveKeyBtn = Ui.Button("Anahtarı Kaydet ve Gizle", () =>
+        {
+            var val = apiBox.Password.Trim();
+            Update(x => x.GoogleApiKey = string.IsNullOrWhiteSpace(val) ? null : val);
+            if (!string.IsNullOrWhiteSpace(val))
+            {
+                keyStatusText.Text = "Google Cloud API Anahtarı: Kayıtlı ve aktif";
+                keyInputContainer.Visibility = Visibility.Collapsed;
+                App.Announce("Google Cloud API anahtarı güvenle kaydedildi ve gizlendi.");
+            }
+            else
+            {
+                keyStatusText.Text = "Google Cloud API Anahtarı: Henüz tanımlanmamış";
+                App.Announce("API anahtarı temizlendi.");
+            }
+        }, "Girilen anahtarı güvenle kaydeder ve ekrandan gizler");
+
+        keyInputContainer.Children.Add(Ui.Text("API Anahtarınızı yapıştırın:"));
+        keyInputContainer.Children.Add(apiBox);
+        keyInputContainer.Children.Add(saveKeyBtn);
+        gPanel.Children.Add(keyInputContainer);
+
+        var toggleBtn = Ui.Button(hasKey ? "API Anahtarını Değiştir / Düzenle" : "API Anahtarı Tanımla", () =>
+        {
+            if (keyInputContainer.Visibility == Visibility.Visible)
+            {
+                keyInputContainer.Visibility = Visibility.Collapsed;
+            }
+            else
+            {
+                keyInputContainer.Visibility = Visibility.Visible;
+                apiBox.Focus();
+            }
+        }, "API anahtarı giriş kutusunu açar veya kapatır");
+        gPanel.Children.Add(toggleBtn);
+
+        var disclaimerText = new TextBlock
+        {
+            Text = "Yasal Sorumluluk Bildirimi: Uygulama içerisinde girilen Google Cloud API anahtarları tamamen kullanıcının kendi sorumluluğundadır. İlgili servis sağlayıcıları tarafından belirlenen kotaların aşılması veya ücretlendirme sebebiyle doğabilecek hiçbir maddi borç, fatura veya mali yükümlülükten uygulama geliştiricisi (Ömer Göktaş) sorumlu tutulamaz. Girilen anahtar yalnızca bu bilgisayarda yerel olarak saklanır.",
+            TextWrapping = TextWrapping.Wrap,
+            Foreground = System.Windows.Media.Brushes.DarkRed,
+            FontSize = 12,
+            Margin = new Thickness(0, 6, 0, 6)
+        };
+        Ui.Name(disclaimerText, disclaimerText.Text);
+        gPanel.Children.Add(disclaimerText);
+        googleGroup.Content = gPanel;
+        stack.Children.Add(googleGroup);
+
         // ---- Okuma
         var readGroup = new GroupBox { Header = "Okuma" };
         Ui.Name(readGroup, "Okuma");
         var read = new StackPanel();
+        read.Children.Add(Ui.Text("Varsayılan Okuma Modu (TTS ve Gezinme)"));
+        read.Children.Add(Ui.Radio("Cümle Cümle Okuma", "okumamodu", () => Update(x => x.TtsReadMode = "Cümle"), s.TtsReadMode != "Paragraf"));
+        read.Children.Add(Ui.Radio("Paragraf Paragraf Okuma (Kesintisiz ve Akıcı)", "okumamodu", () => Update(x => x.TtsReadMode = "Paragraf"), s.TtsReadMode == "Paragraf"));
+
         var auto = new CheckBox { Content = "Sayfa bitince sonraki sayfaya otomatik geç", IsChecked = s.AutoNextPage };
         auto.Checked += (_, _) => Update(x => x.AutoNextPage = true);
         auto.Unchecked += (_, _) => Update(x => x.AutoNextPage = false);
@@ -124,6 +196,7 @@ public sealed class SettingsPage : PageBase
         Content = root;
 
         RefreshVoices();
+        if (App.Tts.ActiveEngine is EdgeTtsEngine edgeInit) edgeInit.PreWarm();
         _syncing = false;
     }
 
@@ -154,6 +227,7 @@ public sealed class SettingsPage : PageBase
         _engineId = id;
         Update(x => { x.SelectedTtsEngine = id; x.SelectedVoiceId = null; });
         RefreshVoices();
+        if (App.Tts.ActiveEngine is EdgeTtsEngine edge) edge.PreWarm();
         App.Announce("Konuşma motoru değiştirildi, " + App.Tts.ActiveEngine.DisplayName);
     }
 

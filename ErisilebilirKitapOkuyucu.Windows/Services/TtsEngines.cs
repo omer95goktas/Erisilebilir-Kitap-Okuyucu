@@ -21,6 +21,7 @@ public interface ITtsEngine : IDisposable
     IReadOnlyList<VoiceDescriptor> GetVoices();
     Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct);
     Task SynthesizeToWavAsync(string text, string? voiceId, float rate, float pitch, string path, CancellationToken ct);
+    Task PreFetchAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct) => Task.CompletedTask;
 }
 
 /// <summary>SAPI 5 motoru: sistemde kayıtlı tüm SAPI 5 sesleri (Microsoft Tolga/Hazel, 3. parti sesler vb.).</summary>
@@ -182,5 +183,12 @@ public sealed class OneCoreEngine : ITtsEngine
 
 public static class TtsEngines
 {
-    public static IReadOnlyList<ITtsEngine> CreateAll() => new ITtsEngine[] { new OneCoreEngine(), new SapiEngine() };
+    public static IReadOnlyList<ITtsEngine> CreateAll() => new ITtsEngine[]
+    {
+        new SherpaTtsEngine(),
+        new EdgeTtsEngine(),
+        new GoogleCloudTtsEngine(),
+        new OneCoreEngine(),
+        new SapiEngine()
+    };
 }
