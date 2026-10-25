@@ -418,7 +418,7 @@ public sealed class HelpDialog : DialogBase
 
 <h2>Geliştirici ve İletişim</h2>
 <ul>
-  <li><strong>Uygulama:</strong> Erişilebilir Kitap Okuyucu (Windows v1.0.1 Test Sürümü)</li>
+  <li><strong>Uygulama:</strong> Erişilebilir Kitap Okuyucu (Windows v1.0.1)</li>
   <li><strong>Geliştirici:</strong> Ömer Göktaş</li>
   <li><strong>E-Posta:</strong> mail@omergoktas.net</li>
   <li><strong>Web Sitesi:</strong> https://omergoktas.net</li>
