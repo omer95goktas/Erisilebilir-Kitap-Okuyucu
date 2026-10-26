@@ -19,3 +19,6 @@ installer/ErisilebilirKitapOkuyucu_Kurulum.exe
 ErisilebilirKitapOkuyucu.exe
 ErisilebilirKitapOkuyucu_Kurulum.exe
 release_artifacts/
+
+msix_staging/
+
