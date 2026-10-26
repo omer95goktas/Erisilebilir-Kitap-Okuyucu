@@ -34,7 +34,8 @@ public sealed class ReaderPage : PageBase
         TextWrapping = TextWrapping.Wrap,
         VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-        MinHeight = 180,
+        MinHeight = 220,
+        Padding = new Thickness(14, 12, 14, 12),
         Margin = new Thickness(0, 0, 0, 8),
         SpellCheck = { IsEnabled = false }
     };
@@ -64,7 +65,7 @@ public sealed class ReaderPage : PageBase
         Ui.Name(_pitch, "Ses perdesi");
 
         _prevPage = Ui.Button("Önceki Sayfa", () => Step(-1), "Ctrl+Sol ok");
-        _play = Ui.Button("Oku", ToggleTts, "Boşluk tuşu. Sayfayı sesli okumayı başlatır veya duraklatır", "Oku");
+        _play = Ui.Button("Oku", ToggleTts, "Boşluk tuşu. Sayfayı sesli okumayı başlatır veya duraklatır", "Oku", isPrimary: true);
         _nextPage = Ui.Button("Sonraki Sayfa", () => Step(1), "Ctrl+Sağ ok");
         _btnReadMode = Ui.Button($"Okuma Modu: {App.Repo.Settings.TtsReadMode}", ToggleReadMode, "Cümle veya Paragraf bazlı okuma arasında geçiş yapar");
 

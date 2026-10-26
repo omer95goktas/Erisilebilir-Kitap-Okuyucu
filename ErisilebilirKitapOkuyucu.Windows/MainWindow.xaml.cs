@@ -19,12 +19,25 @@ public partial class MainWindow : Window
 
     public static MainWindow Instance { get; private set; } = null!;
     private PageBase? _current;
-    public BookItem? NowPlayingAudio { get; set; }
+    private BookItem? _nowPlayingAudio;
+    public BookItem? NowPlayingAudio
+    {
+        get => _nowPlayingAudio;
+        set
+        {
+            _nowPlayingAudio = value;
+            if (NowPlayingPanel != null)
+            {
+                NowPlayingPanel.Visibility = (value != null && App.Audio.CurrentPath != null) ? Visibility.Visible : Visibility.Collapsed;
+            }
+        }
+    }
 
     public MainWindow()
     {
         Instance = this;
         InitializeComponent();
+        BtnNowPlaying.Click += (_, _) => ReturnToAudio();
         PreviewKeyDown += OnKey;
         Drop += async (_, e) =>
         {

@@ -33,6 +33,7 @@ SolidCompression=yes
 
 ; Görünüm ve Erişilebilirlik
 WizardStyle=modern
+SetupIconFile=app.ico
 DisableDirPage=yes
 DisableReadyPage=yes
 AlwaysShowDirOnReadyPage=no

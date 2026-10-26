@@ -43,7 +43,7 @@ public sealed class AudioPage : PageBase
         Ui.Name(_vol, "Ses düzeyi");
 
         _back = Ui.Button($"{Seek} sn Geri", () => App.Audio.SeekBy(-Seek), "Sol ok");
-        _play = Ui.Button("Oynat", () => App.Audio.TogglePlayPause(), "Boşluk tuşu. Medya oynat/duraklat tuşu da çalışır", "Oynat");
+        _play = Ui.Button("Oynat", () => App.Audio.TogglePlayPause(), "Boşluk tuşu. Medya oynat/duraklat tuşu da çalışır", "Oynat", isPrimary: true);
         _fwd = Ui.Button($"{Seek} sn İleri", () => App.Audio.SeekBy(Seek), "Sağ ok");
         _prevCh = Ui.Button("Önceki Ayrım", () => ChangeChapter(-1), "Ctrl+Sol ok");
         _nextCh = Ui.Button("Sonraki Ayrım", () => ChangeChapter(1), "Ctrl+Sağ ok");

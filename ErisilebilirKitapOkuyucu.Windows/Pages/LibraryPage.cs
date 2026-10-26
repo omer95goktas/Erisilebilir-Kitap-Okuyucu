@@ -40,22 +40,22 @@ public sealed class LibraryPage : PageBase
         KeyboardNavigation.SetIsTabStop(_heading, false);
         Ui.Name(_heading, "Kitaplığım");
 
-        _btnAdd = Ui.Button("_Kitap Ekle", AddBooks, "Ctrl+O. PDF, TXT, EPUB, DOCX, ZIP veya ses dosyası ekler", "Kitap Ekle");
-        var toolbar = new WrapPanel();
+        _btnAdd = Ui.Button("+ Kitap Ekle", AddBooks, "Ctrl+O. PDF, TXT, EPUB, DOCX, ZIP veya ses dosyası ekler", "Kitap Ekle", isPrimary: true);
+        var toolbar = new WrapPanel { Margin = new Thickness(0, 2, 0, 8) };
         toolbar.Children.Add(_btnAdd);
-        toolbar.Children.Add(Ui.Button("Web _Bağlantısı Ekle", AddWeb, "Ctrl+U. Bir web sayfasındaki makaleyi okunabilir kitap olarak ekler", "Web Bağlantısı Ekle"));
-        toolbar.Children.Add(Ui.Button("Metin _Yapıştır", AddClipboardText, "Ctrl+Shift+V. Panodaki metni kitap olarak ekler", "Metin Yapıştır"));
-        toolbar.Children.Add(Ui.Button("A_yarlar", () => Host.ShowSettings(), "Ctrl+Virgül. Ses motoru, okuma hızı ve görünüm ayarları", "Ayarlar"));
-        toolbar.Children.Add(Ui.Button("_Yardım", () => new HelpDialog(Host).ShowDialog(), "F1. Klavye kısayolları", "Yardım"));
+        toolbar.Children.Add(Ui.Button("Web Bağlantısı Ekle", AddWeb, "Ctrl+U. Bir web sayfasındaki makaleyi okunabilir kitap olarak ekler", "Web Bağlantısı Ekle"));
+        toolbar.Children.Add(Ui.Button("Metin Yapıştır", AddClipboardText, "Ctrl+Shift+V. Panodaki metni kitap olarak ekler", "Metin Yapıştır"));
+        toolbar.Children.Add(Ui.Button("Ayarlar", () => Host.ShowSettings(), "Ctrl+Virgül. Ses motoru, okuma hızı ve görünüm ayarları", "Ayarlar"));
+        toolbar.Children.Add(Ui.Button("Yardım", () => new HelpDialog(Host).ShowDialog(), "F1. Klavye kısayolları", "Yardım"));
         if (Host.NowPlayingAudio != null && App.Audio.CurrentPath != null)
             toolbar.Children.Add(Ui.Button("Çalan Sesli Kitaba Dön", () => Host.ReturnToAudio(), $"Şu an çalan: {Host.NowPlayingAudio.Title}"));
 
         // --- Sol: klasörler
-        var left = new DockPanel { Margin = new Thickness(0, 0, 12, 0), Width = 280 };
+        var left = new DockPanel();
         var folderLabel = Ui.Text("Klasörler", "SubHeading");
         DockPanel.SetDock(folderLabel, Dock.Top);
         left.Children.Add(folderLabel);
-        var folderButtons = new WrapPanel();
+        var folderButtons = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
         folderButtons.Children.Add(Ui.Button("Yeni Klasör", NewFolder, "Ctrl+N"));
         folderButtons.Children.Add(Ui.Button("Yeniden Adlandır", RenameFolder));
         folderButtons.Children.Add(Ui.Button("Klasörü Sil", DeleteFolder));
@@ -71,9 +71,21 @@ public sealed class LibraryPage : PageBase
         };
         left.Children.Add(_folders);
 
+        var leftCard = new Border
+        {
+            Background = (System.Windows.Media.Brush)Application.Current.Resources["PanelBg"],
+            BorderBrush = (System.Windows.Media.Brush)Application.Current.Resources["LineBrush"],
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(12),
+            Margin = new Thickness(0, 0, 12, 0),
+            Width = 270,
+            Child = left
+        };
+
         // --- Sağ: kitaplar
         var right = new DockPanel();
-        var filterRow = new WrapPanel();
+        var filterRow = new WrapPanel { Margin = new Thickness(0, 0, 0, 4) };
         var filterLabel = Ui.Text("Göster:");
         filterLabel.VerticalAlignment = VerticalAlignment.Center;
         filterRow.Children.Add(filterLabel);
@@ -83,9 +95,10 @@ public sealed class LibraryPage : PageBase
         DockPanel.SetDock(filterRow, Dock.Top);
         right.Children.Add(filterRow);
 
-        var searchRow = new DockPanel();
+        var searchRow = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
         var searchLabel = Ui.Text("Kitap ara:");
         searchLabel.VerticalAlignment = VerticalAlignment.Center;
+        searchLabel.Margin = new Thickness(0, 0, 8, 0);
         DockPanel.SetDock(searchLabel, Dock.Left);
         searchRow.Children.Add(searchLabel);
         Ui.Name(_search, "Kitap ara");
@@ -94,8 +107,8 @@ public sealed class LibraryPage : PageBase
         DockPanel.SetDock(searchRow, Dock.Top);
         right.Children.Add(searchRow);
 
-        var bookButtons = new WrapPanel();
-        bookButtons.Children.Add(Ui.Button("Kitabı Aç", OpenSelected, "Enter"));
+        var bookButtons = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+        bookButtons.Children.Add(Ui.Button("Kitabı Aç", OpenSelected, "Enter", isPrimary: true));
         bookButtons.Children.Add(Ui.Button("Kitap Bilgisi", ShowInfo));
         bookButtons.Children.Add(Ui.Button("Klasöre Taşı", MoveSelected));
         bookButtons.Children.Add(Ui.Button("Kitaplıktan Kaldır", RemoveSelected, "Delete tuşu"));
@@ -114,9 +127,20 @@ public sealed class LibraryPage : PageBase
         _books.ContextMenu = BuildContextMenu();
         right.Children.Add(_books);
 
+        var rightCard = new Border
+        {
+            Background = (System.Windows.Media.Brush)Application.Current.Resources["PanelBg"],
+            BorderBrush = (System.Windows.Media.Brush)Application.Current.Resources["LineBrush"],
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(10),
+            Padding = new Thickness(12),
+            Child = right
+        };
+
         var content = new DockPanel();
-        content.Children.Add(left);
-        content.Children.Add(right);
+        DockPanel.SetDock(leftCard, Dock.Left);
+        content.Children.Add(leftCard);
+        content.Children.Add(rightCard);
 
         var root = new DockPanel();
         DockPanel.SetDock(_heading, Dock.Top);
@@ -212,7 +236,34 @@ public sealed class LibraryPage : PageBase
         foreach (var f in App.Repo.Folders)
         {
             var count = App.Repo.Books.Count(b => (b.FolderName ?? BookItem.RootFolder) == f);
-            var item = new ListBoxItem { Content = $"{f} ({count})", Tag = f };
+            var dock = new DockPanel { LastChildFill = true };
+            var countBadge = new Border
+            {
+                Background = (System.Windows.Media.Brush)Application.Current.Resources["BadgeBg"],
+                CornerRadius = new CornerRadius(10),
+                Padding = new Thickness(8, 2, 8, 2),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(countBadge, Dock.Right);
+            countBadge.Child = new TextBlock
+            {
+                Text = count.ToString(),
+                FontSize = 11,
+                FontWeight = FontWeights.SemiBold,
+                Foreground = (System.Windows.Media.Brush)Application.Current.Resources["BadgeFg"]
+            };
+            dock.Children.Add(countBadge);
+
+            var nameBlock = new TextBlock
+            {
+                Text = f,
+                VerticalAlignment = VerticalAlignment.Center,
+                FontSize = 14,
+                TextTrimming = TextTrimming.CharacterEllipsis
+            };
+            dock.Children.Add(nameBlock);
+
+            var item = new ListBoxItem { Content = dock, Tag = f };
             Ui.Name(item, $"{f} klasörü, {count} kitap");
             _folders.Items.Add(item);
             if (f == CurrentFolder) item.IsSelected = true;
@@ -238,10 +289,56 @@ public sealed class LibraryPage : PageBase
 
         foreach (var b in list)
         {
-            var sp = new StackPanel();
-            sp.Children.Add(new TextBlock { Text = b.Title, FontWeight = FontWeights.Bold });
-            sp.Children.Add(new TextBlock { Text = b.Summary, FontSize = Math.Max(12, (double)Application.Current.Resources["BaseFontSize"] - 4) });
-            var item = new ListBoxItem { Content = sp, Tag = b };
+            var dock = new DockPanel { LastChildFill = true, Margin = new Thickness(2) };
+
+            var badgeColor = b.Type switch
+            {
+                BookType.PDF => "#DC2626",
+                BookType.EPUB => "#16A34A",
+                BookType.DOCX => "#2563EB",
+                BookType.AUDIO => "#9333EA",
+                _ => "#475569"
+            };
+
+            var badgeBorder = new Border
+            {
+                Background = new System.Windows.Media.SolidColorBrush((System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(badgeColor)),
+                CornerRadius = new CornerRadius(5),
+                Padding = new Thickness(6, 2, 6, 2),
+                Margin = new Thickness(0, 0, 10, 0),
+                VerticalAlignment = VerticalAlignment.Center
+            };
+            DockPanel.SetDock(badgeBorder, Dock.Left);
+            badgeBorder.Child = new TextBlock
+            {
+                Text = b.TypeLabel.ToUpperInvariant(),
+                FontSize = 10,
+                FontWeight = FontWeights.Bold,
+                Foreground = System.Windows.Media.Brushes.White,
+                HorizontalAlignment = HorizontalAlignment.Center
+            };
+            dock.Children.Add(badgeBorder);
+
+            var textStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+            var titleBlock = new TextBlock
+            {
+                Text = b.Title,
+                FontSize = 15,
+                FontWeight = FontWeights.SemiBold,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(0, 0, 0, 2)
+            };
+            var summaryBlock = new TextBlock
+            {
+                Text = b.Summary,
+                FontSize = 13,
+                Foreground = (System.Windows.Media.Brush)Application.Current.Resources["SubTextFg"]
+            };
+            textStack.Children.Add(titleBlock);
+            textStack.Children.Add(summaryBlock);
+            dock.Children.Add(textStack);
+
+            var item = new ListBoxItem { Content = dock, Tag = b };
             Ui.Name(item, b.AccessibleName);
             _books.Items.Add(item);
             if (b.Id == prevId) item.IsSelected = true;

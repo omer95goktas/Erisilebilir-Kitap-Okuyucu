@@ -85,8 +85,8 @@ public class AppSettings
     public float TtsSpeechRate { get; set; } = 1.0f;
     public float TtsPitch { get; set; } = 1.0f;
     public bool AutoNextPage { get; set; } = true;
-    public bool HighContrastMode { get; set; } = true;
-    public int FontSizeSp { get; set; } = 20;
+    public bool HighContrastMode { get; set; } = false;
+    public int FontSizeSp { get; set; } = 18;
     public float AudioSpeed { get; set; } = 1.0f;
     public float AudioVolume { get; set; } = 1.0f;
     /// <summary>"sapi" (SAPI 5), "onecore" (Windows OneCore) ya da null (otomatik).</summary>

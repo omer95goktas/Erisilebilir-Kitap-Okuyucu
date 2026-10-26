@@ -20,9 +20,13 @@ public abstract class PageBase : UserControl
 
 public static class Ui
 {
-    public static Button Button(string text, Action click, string? help = null, string? name = null, string? tip = null)
+    public static Button Button(string text, Action click, string? help = null, string? name = null, string? tip = null, bool isPrimary = false)
     {
         var b = new Button { Content = text };
+        if (isPrimary && Application.Current?.Resources["PrimaryButton"] is Style ps)
+        {
+            b.Style = ps;
+        }
         AutomationProperties.SetName(b, name ?? text.Replace("_", ""));
         if (help != null) AutomationProperties.SetHelpText(b, help);
         if (tip != null) b.ToolTip = tip;

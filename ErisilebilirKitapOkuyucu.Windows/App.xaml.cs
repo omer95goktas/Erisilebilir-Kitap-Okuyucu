@@ -103,24 +103,60 @@ public static class ThemeManager
             // Windows yüksek karşıtlık teması etkinse sistem renklerine tam uyum
             r["AppBg"] = B(SystemColors.WindowColor);
             r["AppFg"] = B(SystemColors.WindowTextColor);
+            r["SubTextFg"] = B(SystemColors.WindowTextColor);
             r["PanelBg"] = B(SystemColors.WindowColor);
+            r["PanelHeaderBg"] = B(SystemColors.WindowColor);
             r["AccentBg"] = B(SystemColors.HighlightColor);
+            r["AccentHover"] = B(SystemColors.HighlightColor);
             r["AccentFg"] = B(SystemColors.HighlightTextColor);
             r["LineBrush"] = B(SystemColors.WindowTextColor);
+            r["ButtonBg"] = B(SystemColors.WindowColor);
+            r["ButtonHoverBg"] = B(SystemColors.HighlightColor);
+            r["ButtonBorder"] = B(SystemColors.WindowTextColor);
             r["FocusBrush"] = B(SystemColors.HotTrackColor);
             r["DisabledFg"] = B(SystemColors.GrayTextColor);
+            r["BadgeBg"] = B(SystemColors.WindowColor);
+            r["BadgeFg"] = B(SystemColors.WindowTextColor);
         }
         else if (s.HighContrastMode)
         {
-            r["AppBg"] = B("#000000"); r["AppFg"] = B("#FFFFFF"); r["PanelBg"] = B("#141414");
-            r["AccentBg"] = B("#FFD600"); r["AccentFg"] = B("#000000"); r["LineBrush"] = B("#BDBDBD");
-            r["FocusBrush"] = B("#00E5FF"); r["DisabledFg"] = B("#9E9E9E");
+            // Manuel Yüksek Karşıtlık (Siyah Zemin, Sarı Vurgu)
+            r["AppBg"] = B("#000000");
+            r["AppFg"] = B("#FFFFFF");
+            r["SubTextFg"] = B("#DDDDDD");
+            r["PanelBg"] = B("#121212");
+            r["PanelHeaderBg"] = B("#181818");
+            r["AccentBg"] = B("#FFD600");
+            r["AccentHover"] = B("#FFE033");
+            r["AccentFg"] = B("#000000");
+            r["LineBrush"] = B("#888888");
+            r["ButtonBg"] = B("#1E1E1E");
+            r["ButtonHoverBg"] = B("#FFD600");
+            r["ButtonBorder"] = B("#BDBDBD");
+            r["FocusBrush"] = B("#00E5FF");
+            r["DisabledFg"] = B("#757575");
+            r["BadgeBg"] = B("#2A2A2A");
+            r["BadgeFg"] = B("#FFD600");
         }
         else
         {
-            r["AppBg"] = B("#FFFFFF"); r["AppFg"] = B("#111111"); r["PanelBg"] = B("#F3F3F3");
-            r["AccentBg"] = B("#0B57D0"); r["AccentFg"] = B("#FFFFFF"); r["LineBrush"] = B("#5F6368");
-            r["FocusBrush"] = B("#D93025"); r["DisabledFg"] = B("#6B6B6B");
+            // Modern Aydınlık / Fluent Tasarım (Gözü yormayan, zarif ve modern)
+            r["AppBg"] = B("#F8FAFC");
+            r["AppFg"] = B("#0F172A");
+            r["SubTextFg"] = B("#475569");
+            r["PanelBg"] = B("#FFFFFF");
+            r["PanelHeaderBg"] = B("#FFFFFF");
+            r["AccentBg"] = B("#2563EB");
+            r["AccentHover"] = B("#1D4ED8");
+            r["AccentFg"] = B("#FFFFFF");
+            r["LineBrush"] = B("#E2E8F0");
+            r["ButtonBg"] = B("#FFFFFF");
+            r["ButtonHoverBg"] = B("#F1F5F9");
+            r["ButtonBorder"] = B("#CBD5E1");
+            r["FocusBrush"] = B("#2563EB");
+            r["DisabledFg"] = B("#94A3B8");
+            r["BadgeBg"] = B("#EFF6FF");
+            r["BadgeFg"] = B("#1D4ED8");
         }
         r["BaseFontSize"] = (double)Math.Clamp(s.FontSizeSp, 14, 40);
     }
