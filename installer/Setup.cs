@@ -236,7 +236,17 @@ namespace ErisilebilirKitapOkuyucu.Setup
                 string exePath = Path.Combine(installDir, "ErisilebilirKitapOkuyucu.exe");
                 if (File.Exists(exePath))
                 {
-                    System.Diagnostics.Process.Start(exePath);
+                    try
+                    {
+                        var psi = new System.Diagnostics.ProcessStartInfo
+                        {
+                            FileName = exePath,
+                            WorkingDirectory = installDir,
+                            UseShellExecute = true
+                        };
+                        System.Diagnostics.Process.Start(psi);
+                    }
+                    catch { }
                 }
                 this.Close();
                 return;
@@ -244,42 +254,80 @@ namespace ErisilebilirKitapOkuyucu.Setup
 
             btnAction.Enabled = false;
             progressBar.Visible = true;
-            progressBar.Style = ProgressBarStyle.Marquee;
-            lblStatus.Text = isUpdate ? "Güncelleme yükleniyor, lütfen bekleyin..." : "Dosyalar yükleniyor ve kuruluyor, lütfen bekleyin...";
+            progressBar.Style = ProgressBarStyle.Continuous;
+            progressBar.Value = 0;
+            
+            string startMsg = isUpdate ? "Güncelleme yükleniyor, lütfen bekleyin..." : "Kurulum başlatıldı, dosyalar yükleniyor, lütfen bekleyin...";
+            lblStatus.Text = startMsg;
+            this.Text = "Kuruluyor... " + (isUpdate ? "Güncelleme" : "Kurulum") + " — omergoktas.net";
+
+            // Ekran okuyucular ve kullanıcı için anında sistem sesi
+            System.Media.SystemSounds.Asterisk.Play();
 
             try
             {
-                await Task.Run(() => PerformInstall());
+                var progressHandler = new Progress<int>(percent =>
+                {
+                    progressBar.Value = Math.Min(100, Math.Max(0, percent));
+                    if (percent % 25 == 0 && percent > 0 && percent < 100)
+                    {
+                        lblStatus.Text = (isUpdate ? "Güncelleniyor: %" : "Kuruluyor: %") + percent;
+                        this.Text = "%" + percent + " Tamamlandı — omergoktas.net";
+                    }
+                });
 
-                progressBar.Style = ProgressBarStyle.Continuous;
+                await Task.Run(() => PerformInstall(progressHandler));
+
                 progressBar.Value = 100;
-                lblStatus.Text = isUpdate 
+                string doneMsg = isUpdate 
                     ? "Tebrikler! Güncelleme başarıyla tamamlandı. Kitaplarınız ve ayarlarınız korundu." 
-                    : "Tebrikler! Kurulum başarıyla tamamlandı. Masaüstünüze kısayol eklendi.";
+                    : "Tebrikler! Kurulum başarıyla tamamlandı. Masaüstünüze ve Başlat menünüze kısayol eklendi.";
+                
+                lblStatus.Text = doneMsg;
+                this.Text = "Kurulum Tamamlandı! — omergoktas.net";
                 btnAction.Text = "Uygulamayı Başlat ve Kapat";
                 btnAction.Enabled = true;
                 btnAction.Focus();
+
+                // Kurulum bitiş bildirim sesi
+                System.Media.SystemSounds.Exclamation.Play();
             }
             catch (Exception ex)
             {
                 progressBar.Visible = false;
                 lblStatus.Text = "Hata oluştu: " + ex.Message;
+                this.Text = "Kurulum Hatası — omergoktas.net";
                 btnAction.Enabled = true;
-                MessageBox.Show("İşlem sırasında bir hata oluştu:\n" + ex.Message, "Hata", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                btnAction.Text = isUpdate ? "Tekrar Dene" : "Kurulumu Tekrar Dene";
+                System.Media.SystemSounds.Hand.Play();
+                MessageBox.Show(
+                    "Kurulum sırasında bir hata oluştu:\n\n" + ex.Message + 
+                    "\n\nLütfen açık olan 'Erişilebilir Kitap Okuyucu' pencerelerini kapatıp tekrar deneyin.", 
+                    "Kurulum Hatası", 
+                    MessageBoxButtons.OK, 
+                    MessageBoxIcon.Error);
             }
         }
 
-        private void PerformInstall()
+        private void PerformInstall(IProgress<int> progress)
         {
-            // Eğer uygulama açıksa önce kapat
+            // 1. Eğer uygulama açıksa zorla ve tam olarak kapanmasını bekle
             try
             {
                 foreach (var p in System.Diagnostics.Process.GetProcessesByName("ErisilebilirKitapOkuyucu"))
                 {
-                    try { p.Kill(); } catch { }
+                    try
+                    {
+                        p.Kill();
+                        p.WaitForExit(4000);
+                    }
+                    catch { }
                 }
             }
             catch { }
+
+            // Dosya kilitlerinin Windows tarafından tamamen serbest bırakılması için kısa tampon
+            System.Threading.Thread.Sleep(500);
 
             if (!Directory.Exists(installDir))
             {
@@ -292,20 +340,57 @@ namespace ErisilebilirKitapOkuyucu.Setup
                 if (stream == null) throw new InvalidOperationException("Gömülü kurulum paketi bulunamadı.");
                 using (var archive = new ZipArchive(stream, ZipArchiveMode.Read))
                 {
+                    int total = archive.Entries.Count;
+                    int current = 0;
+
                     foreach (var entry in archive.Entries)
                     {
+                        current++;
+                        if (current % 15 == 0 && progress != null)
+                        {
+                            progress.Report((int)((current * 90.0) / total));
+                        }
+
                         if (string.IsNullOrEmpty(entry.Name))
                         {
                             Directory.CreateDirectory(Path.Combine(installDir, entry.FullName));
                             continue;
                         }
+
                         string destPath = Path.Combine(installDir, entry.FullName);
                         string parentDir = Path.GetDirectoryName(destPath);
                         if (!Directory.Exists(parentDir)) Directory.CreateDirectory(parentDir);
-                        entry.ExtractToFile(destPath, true);
+
+                        // Güvenli dosya yazma (kilit varsa 3 defa kısa aralıkla dene)
+                        bool written = false;
+                        for (int attempt = 0; attempt < 3; attempt++)
+                        {
+                            try
+                            {
+                                entry.ExtractToFile(destPath, true);
+                                written = true;
+                                break;
+                            }
+                            catch (IOException)
+                            {
+                                System.Threading.Thread.Sleep(300);
+                            }
+                            catch (UnauthorizedAccessException)
+                            {
+                                System.Threading.Thread.Sleep(300);
+                            }
+                        }
+
+                        if (!written)
+                        {
+                            // Son bir defa dene, hata verirse fırlat
+                            entry.ExtractToFile(destPath, true);
+                        }
                     }
                 }
             }
+
+            if (progress != null) progress.Report(92);
 
             string exePath = Path.Combine(installDir, "ErisilebilirKitapOkuyucu.exe");
 
@@ -317,12 +402,21 @@ namespace ErisilebilirKitapOkuyucu.Setup
             }
             catch { }
 
+            if (progress != null) progress.Report(95);
+
             // 1. Önce TÜM eski kısayol varyasyonlarını (ASCII/Türkçe, Desktop/OneDrive) temizle
             Program.CleanAllShortcuts();
 
-            // 2. Yalnızca TEK bir geçerli masaüstü kısayolu oluştur
+            // 2. Masaüstü kısayolu oluştur (Öncelikle aktif DesktopDirectory'ye, varsa ek masaüstü konumlarına da garanti olsun diye yaz)
             string activeDesktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
             CreateShortcut(Path.Combine(activeDesktop, "Erişilebilir Kitap Okuyucu.lnk"), exePath, installDir);
+
+            string userProfile = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            string normalDesktop = Path.Combine(userProfile, "Desktop");
+            if (Directory.Exists(normalDesktop) && !normalDesktop.Equals(activeDesktop, StringComparison.OrdinalIgnoreCase))
+            {
+                CreateShortcut(Path.Combine(normalDesktop, "Erişilebilir Kitap Okuyucu.lnk"), exePath, installDir);
+            }
 
             // 3. Başlat Menüsü kısayolu oluştur
             string startMenuDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Programs), "Erişilebilir Kitap Okuyucu");
@@ -337,7 +431,7 @@ namespace ErisilebilirKitapOkuyucu.Setup
                     if (key != null)
                     {
                         key.SetValue("DisplayName", "Erişilebilir Kitap Okuyucu");
-                        key.SetValue("DisplayVersion", "1.0.0");
+                        key.SetValue("DisplayVersion", "1.0.1");
                         key.SetValue("Publisher", "omergoktas.net");
                         key.SetValue("InstallLocation", installDir);
                         key.SetValue("DisplayIcon", exePath);
@@ -347,6 +441,8 @@ namespace ErisilebilirKitapOkuyucu.Setup
                 }
             }
             catch { }
+
+            if (progress != null) progress.Report(100);
         }
 
         private void CreateShortcut(string shortcutPath, string targetPath, string workDir)
