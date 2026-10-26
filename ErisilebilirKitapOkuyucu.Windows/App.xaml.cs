@@ -55,6 +55,11 @@ public partial class App : Application
             var pdfDir = st + 2 < e.Args.Length ? e.Args[st + 2] : null;
             _ = Dispatcher.InvokeAsync(async () => { var code = await SelfTest.RunAsync(report, pdfDir); Shutdown(code); });
         }
+
+        if (Array.IndexOf(e.Args, "--snapshots") >= 0)
+        {
+            _ = Dispatcher.InvokeAsync(() => Snapshots.Run(this));
+        }
     }
 
     protected override void OnExit(ExitEventArgs e)

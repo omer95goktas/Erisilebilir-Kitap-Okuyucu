@@ -37,6 +37,17 @@ public partial class MainWindow : Window
     {
         Instance = this;
         InitializeComponent();
+        try
+        {
+            var logoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "app_logo.png");
+            if (File.Exists(logoPath))
+            {
+                var bi = new System.Windows.Media.Imaging.BitmapImage(new Uri(logoPath, UriKind.Absolute));
+                Icon = bi;
+                LogoImage.Source = bi;
+            }
+        }
+        catch { }
         BtnNowPlaying.Click += (_, _) => ReturnToAudio();
         PreviewKeyDown += OnKey;
         Drop += async (_, e) =>

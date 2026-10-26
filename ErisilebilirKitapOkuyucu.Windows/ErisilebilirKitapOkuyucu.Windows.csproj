@@ -39,8 +39,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Resource Include="Assets\app_logo.png" />
-    <Resource Include="app.ico" />
+    <Content Include="Assets\app_logo.png">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+    <Content Include="app.ico">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
     <EmbeddedResource Include="Assets\*.wav" />
   </ItemGroup>
 
