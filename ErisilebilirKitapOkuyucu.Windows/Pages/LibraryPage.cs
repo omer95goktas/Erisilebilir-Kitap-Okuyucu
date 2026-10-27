@@ -4,6 +4,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Microsoft.Win32;
+using ErisilebilirKitapOkuyucu.Services;
 
 namespace ErisilebilirKitapOkuyucu.Pages;
 
@@ -355,8 +356,42 @@ public sealed class LibraryPage : PageBase
 
     private async void AddBooks()
     {
-        var dlg = new OpenFileDialog { Title = "Kitap seçin", Filter = Services.ImportService.Filter, Multiselect = true };
-        if (dlg.ShowDialog(Host) == true) await Host.ImportFilesAsync(dlg.FileNames);
+        try
+        {
+            var dlg = new OpenFileDialog
+            {
+                Title = "Kitap seçin",
+                Filter = Services.ImportService.Filter,
+                Multiselect = true,
+                CheckFileExists = true,
+                CheckPathExists = true,
+                ValidateNames = true,
+                DereferenceLinks = true
+            };
+
+            bool? result = false;
+            try
+            {
+                result = dlg.ShowDialog(Host);
+            }
+            catch (Exception ex)
+            {
+                AppPaths.Log("OpenFileDialog Host ile açılamadı, bağımsız deneniyor: " + ex);
+                // Windows 10'da owner window ile COM çakışması olabildiği için fallback olarak null owner ile aç
+                result = dlg.ShowDialog();
+            }
+
+            if (result == true && dlg.FileNames != null && dlg.FileNames.Length > 0)
+            {
+                await Host.ImportFilesAsync(dlg.FileNames);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log("AddBooks hatası: " + ex);
+            Host.SetStatus("Dosya seçilemedi: " + ex.Message, true);
+            MessageBox.Show(Host, "Dosya seçilirken bir hata oluştu:\n" + ex.Message, "Dosya Seçimi", MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
     }
 
     private async void AddWeb()

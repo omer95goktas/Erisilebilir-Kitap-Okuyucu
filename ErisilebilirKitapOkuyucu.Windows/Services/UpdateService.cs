@@ -26,7 +26,7 @@ public class GitHubReleaseInfo
 
 public static class UpdateService
 {
-    public const string CurrentVersion = "1.0.3";
+    public const string CurrentVersion = "1.0.7";
     public const string GitHubRepo = "omer95goktas/Erisilebilir-Kitap-Okuyucu";
     private static readonly HttpClient Http = new()
     {
@@ -38,15 +38,23 @@ public static class UpdateService
         Http.DefaultRequestHeaders.Add("User-Agent", "ErisilebilirKitapOkuyucu-Windows");
     }
 
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode, SetLastError = true)]
+    private static extern int GetCurrentPackageFullName(ref int packageFullNameLength, System.Text.StringBuilder? packageFullName);
+
     /// <summary>
     /// Uygulamanın MSIX (Microsoft Store) paketi olarak mı yoksa standart .exe olarak mı çalıştığını tespit eder.
+    /// Windows 10 Win32 uyumlu ve çökmeyen yerel API çağrısı kullanır.
     /// </summary>
     public static bool IsRunningAsMsix()
     {
         try
         {
-            var package = Windows.ApplicationModel.Package.Current;
-            return package != null && !string.IsNullOrEmpty(package.Id?.FullName);
+            int length = 0;
+            int result = GetCurrentPackageFullName(ref length, null);
+            // APPX_ERROR_NO_PACKAGE = 15700 (0x3D54)
+            // Eğer 15700 dönüyorsa uygulama klasik .exe olarak çalışıyordur.
+            // ERROR_INSUFFICIENT_BUFFER (122) dönüyorsa paketli (MSIX) bir uygulamadır.
+            return result != 15700 && result != 0x3D54;
         }
         catch
         {

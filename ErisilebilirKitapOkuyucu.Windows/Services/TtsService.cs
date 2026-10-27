@@ -63,12 +63,14 @@ public sealed class TtsService : IDisposable
         if (paragraphMode)
         {
             int pos = 0;
+            // Paragraflar: Çift satır sonu (\n\n veya \r\n\r\n) ile veya metin satırları ile ayrılmış paragrafları bul
             var paras = Regex.Matches(text, @"[^\r\n]+(?:\r?\n(?!\r?\n)[^\r\n]+)*");
             foreach (Match p in paras)
             {
                 var clean = p.Value.Trim();
                 if (clean.Length == 0) continue;
                 var idx = text.IndexOf(clean, pos, StringComparison.Ordinal);
+                if (idx < 0) idx = text.IndexOf(clean, StringComparison.Ordinal);
                 if (idx < 0) idx = pos;
                 result.Add(new Sentence(clean, idx, clean.Length));
                 pos = idx + clean.Length;

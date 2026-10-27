@@ -77,13 +77,13 @@ public sealed class SettingsPage : PageBase
 
         var saveKeyBtn = Ui.Button("Anahtarı Kaydet ve Gizle", () =>
         {
-            var val = apiBox.Password.Trim();
+            var val = GoogleCloudTtsEngine.CleanApiKey(apiBox.Password);
             Update(x => x.GoogleApiKey = string.IsNullOrWhiteSpace(val) ? null : val);
             if (!string.IsNullOrWhiteSpace(val))
             {
                 keyStatusText.Text = "Google Cloud API Anahtarı: Kayıtlı ve aktif";
                 keyInputContainer.Visibility = Visibility.Collapsed;
-                App.Announce("Google Cloud API anahtarı güvenle kaydedildi ve gizlendi.");
+                App.Announce("Google Cloud API anahtarı temizlenip güvenle kaydedildi.");
             }
             else
             {
@@ -92,9 +92,23 @@ public sealed class SettingsPage : PageBase
             }
         }, "Girilen anahtarı güvenle kaydeder ve ekrandan gizler");
 
+        var testKeyBtn = Ui.Button("API Anahtarını Test Et", async () =>
+        {
+            var keyToTest = !string.IsNullOrWhiteSpace(apiBox.Password)
+                ? GoogleCloudTtsEngine.CleanApiKey(apiBox.Password)
+                : App.Repo?.Settings?.GoogleApiKey;
+
+            App.Announce("Google Cloud API anahtarı test ediliyor, lütfen bekleyin...");
+            var (success, message) = await GoogleCloudTtsEngine.ValidateApiKeyAsync(keyToTest);
+            App.Announce(message);
+            MessageBox.Show(message, success ? "Doğrulama Başarılı" : "Doğrulama Başarısız",
+                MessageBoxButton.OK, success ? MessageBoxImage.Information : MessageBoxImage.Warning);
+        }, "Girilen anahtarın Google sunucularıyla çalışıp çalışmadığını test eder");
+
         keyInputContainer.Children.Add(Ui.Text("API Anahtarınızı yapıştırın:"));
         keyInputContainer.Children.Add(apiBox);
         keyInputContainer.Children.Add(saveKeyBtn);
+        keyInputContainer.Children.Add(testKeyBtn);
         gPanel.Children.Add(keyInputContainer);
 
         var toggleBtn = Ui.Button(hasKey ? "API Anahtarını Değiştir / Düzenle" : "API Anahtarı Tanımla", () =>
@@ -110,6 +124,19 @@ public sealed class SettingsPage : PageBase
             }
         }, "API anahtarı giriş kutusunu açar veya kapatır");
         gPanel.Children.Add(toggleBtn);
+
+        if (hasKey)
+        {
+            var quickTestBtn = Ui.Button("Kayıtlı Anahtarı Test Et", async () =>
+            {
+                App.Announce("Kayıtlı Google Cloud API anahtarı test ediliyor...");
+                var (success, message) = await GoogleCloudTtsEngine.ValidateApiKeyAsync();
+                App.Announce(message);
+                MessageBox.Show(message, success ? "Doğrulama Başarılı" : "Doğrulama Başarısız",
+                    MessageBoxButton.OK, success ? MessageBoxImage.Information : MessageBoxImage.Warning);
+            }, "Mevcut kayıtlı Google Cloud anahtarını test eder");
+            gPanel.Children.Add(quickTestBtn);
+        }
 
         var disclaimerText = new TextBlock
         {

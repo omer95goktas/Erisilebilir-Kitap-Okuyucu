@@ -45,21 +45,126 @@ public sealed class GoogleCloudTtsEngine : ITtsEngine
 
     public IReadOnlyList<VoiceDescriptor> GetVoices() => _voices;
 
+    public static string CleanApiKey(string? rawKey)
+    {
+        if (string.IsNullOrWhiteSpace(rawKey)) return string.Empty;
+        var s = rawKey.Trim();
+
+        // Fazladan tırnak işaretlerini temizle ("..." veya '...')
+        if ((s.StartsWith("\"") && s.EndsWith("\"")) || (s.StartsWith("'") && s.EndsWith("'")))
+        {
+            if (s.Length >= 2) s = s.Substring(1, s.Length - 2).Trim();
+        }
+
+        // Bearer veya key= gibi önekleri kaldır
+        if (s.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+        {
+            s = s.Substring(7).Trim();
+        }
+        else if (s.StartsWith("key=", StringComparison.OrdinalIgnoreCase))
+        {
+            s = s.Substring(4).Trim();
+        }
+
+        return s;
+    }
+
     private static string? GetApiKey()
     {
         // 1. Ayarlardan kullanıcının girdiği anahtarı al
         try
         {
-            var saved = App.Repo?.Settings?.GoogleApiKey?.Trim();
+            var saved = CleanApiKey(App.Repo?.Settings?.GoogleApiKey);
             if (!string.IsNullOrEmpty(saved)) return saved;
         }
         catch { }
 
         // 2. Ortam değişkeninden kontrol et
-        var env = Environment.GetEnvironmentVariable("GOOGLE_TTS_API_KEY")?.Trim();
+        var env = CleanApiKey(Environment.GetEnvironmentVariable("GOOGLE_TTS_API_KEY"));
         if (!string.IsNullOrEmpty(env)) return env;
 
         return null;
+    }
+
+    /// <summary>
+    /// Verilen veya kayıtlı Google Cloud TTS API anahtarını 1 kelimelik hafif bir sentez isteğiyle test eder.
+    /// Türkçe ve anlaşılır sonuç mesajı döndürür.
+    /// </summary>
+    public static async Task<(bool success, string message)> ValidateApiKeyAsync(string? rawKey = null)
+    {
+        var key = CleanApiKey(rawKey ?? GetApiKey());
+        if (string.IsNullOrWhiteSpace(key))
+        {
+            return (false, "API anahtarı girilmemiş. Lütfen Google Cloud Console'dan aldığınız API anahtarını yapıştırın.");
+        }
+
+        try
+        {
+            // Hem URL parametresi hem header ekleyerek sorgula
+            string endpoint = $"https://texttospeech.googleapis.com/v1/text:synthesize?key={Uri.EscapeDataString(key)}";
+            var requestBody = new
+            {
+                input = new { text = "Test" },
+                voice = new { languageCode = "tr-TR", name = "tr-TR-Standard-A" },
+                audioConfig = new { audioEncoding = "MP3" }
+            };
+
+            var json = JsonSerializer.Serialize(requestBody);
+            using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
+            {
+                Content = new StringContent(json, Encoding.UTF8, "application/json")
+            };
+            request.Headers.Add("X-Goog-Api-Key", key);
+
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+            using var response = await _http.SendAsync(request, cts.Token);
+            var respString = await response.Content.ReadAsStringAsync(cts.Token);
+
+            if (response.IsSuccessStatusCode)
+            {
+                return (true, "Tebrikler! Google Cloud API anahtarınız geçerli ve başarıyla doğrulandı. Google seslerini kullanabilirsiniz.");
+            }
+
+            // Hata kodunu ve açıklamasını Türkçeleştir
+            string errorDetail = "";
+            string reason = "";
+            try
+            {
+                var doc = JsonNode.Parse(respString);
+                errorDetail = doc?["error"]?["message"]?.ToString() ?? "";
+                reason = doc?["error"]?["status"]?.ToString() ?? "";
+            }
+            catch { }
+
+            if (response.StatusCode == System.Net.HttpStatusCode.Forbidden || response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+            {
+                if (errorDetail.Contains("API has not been used", StringComparison.OrdinalIgnoreCase) ||
+                    errorDetail.Contains("SERVICE_DISABLED", StringComparison.OrdinalIgnoreCase) ||
+                    errorDetail.Contains("not enabled", StringComparison.OrdinalIgnoreCase))
+                {
+                    return (false, "HATA: Google Cloud projenizde 'Cloud Text-to-Speech API' servisi henüz etkinleştirilmemiş. Lütfen Google Cloud Console -> APIs & Services -> Library bölümünden Text-to-Speech API'yi etkinleştirin.");
+                }
+                if (errorDetail.Contains("billing", StringComparison.OrdinalIgnoreCase))
+                {
+                    return (false, "HATA: Google Cloud projenizde faturalandırma hesabı (Billing) tanımlı veya aktif değil.");
+                }
+                return (false, $"HATA: API Anahtarı yetkisiz veya geçersiz. ({response.StatusCode}: {errorDetail})");
+            }
+            if (response.StatusCode == System.Net.HttpStatusCode.BadRequest)
+            {
+                return (false, $"HATA: İstek biçimi geçersiz veya anahtar hatalı kopyalanmış. ({errorDetail})");
+            }
+
+            return (false, $"HATA ({response.StatusCode}): {errorDetail}");
+        }
+        catch (OperationCanceledException)
+        {
+            return (false, "Bağlantı zaman aşımına uğradı. Lütfen internet bağlantınızı kontrol edin.");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Bağlantı hatası: {ex.Message}");
+        }
     }
 
     private async Task<byte[]> SynthesizeMp3Async(string text, string voice, float rate, float pitch, CancellationToken ct)
@@ -71,8 +176,7 @@ public sealed class GoogleCloudTtsEngine : ITtsEngine
         }
 
         // Endpoint: Google API anahtarlarını hem X-Goog-Api-Key başlığında hem query parametresinde destekler.
-        // Güvenli ve sorunsuz çağrı için başlık (header) kullanılır.
-        string endpoint = "https://texttospeech.googleapis.com/v1/text:synthesize";
+        string endpoint = $"https://texttospeech.googleapis.com/v1/text:synthesize?key={Uri.EscapeDataString(apiKey)}";
 
         // Rate: 0.25 - 4.0
         double speakingRate = Math.Clamp(rate, 0.25, 4.0);
@@ -222,6 +326,7 @@ public sealed class GoogleCloudTtsEngine : ITtsEngine
         catch (Exception ex)
         {
             AppPaths.Log($"Google TTS hatası ('{selectedVoice}'): {ex.Message}. Yerel sisteme geçiliyor.");
+            App.Announce("Google ses hatası: " + ex.Message);
             await _fallbackEngine.SpeakAsync(text, null, rate, pitch, ct);
         }
     }

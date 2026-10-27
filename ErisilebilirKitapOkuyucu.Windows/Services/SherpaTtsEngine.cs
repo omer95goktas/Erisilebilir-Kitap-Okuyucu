@@ -39,19 +39,8 @@ public sealed class SherpaTtsEngine : ITtsEngine
 
     public SherpaTtsEngine()
     {
-        // İlk açılışta varsayılan yüksek kaliteli modeli arka planda ısıt (pre-warm)
-        Task.Run(() =>
-        {
-            try
-            {
-                GetOrLoadTts("piper-fahrettin");
-                AppPaths.Log("SherpaTtsEngine: Model (Fahrettin FP32) başarıyla ön yüklendi.");
-            }
-            catch (Exception ex)
-            {
-                AppPaths.Log($"SherpaTtsEngine: Ön yükleme uyarısı: {ex.Message}");
-            }
-        });
+        // Model ön yüklemesini ilk açılışta zorunlu ve acele yapmayalım;
+        // Kullanıcı bu sesi seçtiğinde veya okuma başlattığında yüklensin.
     }
 
     private static string GetFolderName(string voiceId) => "vits-piper-tr_TR-fahrettin-medium";

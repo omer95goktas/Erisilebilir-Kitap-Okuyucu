@@ -4,7 +4,7 @@
 ; ===================================================================
 
 #define MyAppName "Erişilebilir Kitap Okuyucu"
-#define MyAppVersion "1.0.3"
+#define MyAppVersion "1.0.7"
 #define MyAppPublisher "omergoktas.net"
 #define MyAppURL "https://omergoktas.net"
 #define MyAppExeName "ErisilebilirKitapOkuyucu.exe"
@@ -37,8 +37,7 @@ SetupIconFile=app.ico
 DisableDirPage=yes
 DisableReadyPage=yes
 AlwaysShowDirOnReadyPage=no
-CloseApplications=force
-CloseApplicationsFilter=*.exe
+CloseApplications=no
 RestartApplications=no
 ArchitecturesInstallIn64BitMode=x64
 

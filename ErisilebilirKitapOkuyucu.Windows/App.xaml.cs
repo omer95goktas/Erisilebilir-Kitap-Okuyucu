@@ -26,13 +26,17 @@ public partial class App : Application
 
         DispatcherUnhandledException += (_, args) =>
         {
-            AppPaths.Log("UNHANDLED: " + args.Exception);
+            AppPaths.Log("UNHANDLED DISPATCHER: " + args.Exception);
             Announce("Beklenmeyen bir hata oluştu: " + args.Exception.Message);
             MessageBox.Show("Beklenmeyen bir hata oluştu:\n" + args.Exception.Message + "\n\nAyrıntılar: " + AppPaths.LogFile,
                 "Hata", MessageBoxButton.OK, MessageBoxImage.Error);
             args.Handled = true;
         };
         TaskScheduler.UnobservedTaskException += (_, args) => { AppPaths.Log("UNOBSERVED: " + args.Exception); args.SetObserved(); };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+        {
+            AppPaths.Log("UNHANDLED DOMAIN: " + args.ExceptionObject);
+        };
 
         Repo = new BookRepository();
         ThemeManager.Apply(Repo.Settings);
