@@ -26,7 +26,7 @@ public class GitHubReleaseInfo
 
 public static class UpdateService
 {
-    public const string CurrentVersion = "1.0.7";
+    public const string CurrentVersion = "1.0.8";
     public const string GitHubRepo = "omer95goktas/Erisilebilir-Kitap-Okuyucu";
     private static readonly HttpClient Http = new()
     {

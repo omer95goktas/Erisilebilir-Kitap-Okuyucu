@@ -40,7 +40,7 @@ public sealed class ReaderPage : PageBase
         SpellCheck = { IsEnabled = false }
     };
 
-    private readonly Button _play, _prevPage, _nextPage, _btnReadMode;
+    private readonly Button _play, _prevPage, _nextPage, _btnReadMode, _btnSpeakCurrent;
     private readonly TextBox _gotoBox = new() { Width = 90 };
     private readonly Slider _rate = new() { Minimum = 0.5, Maximum = 3.0, SmallChange = 0.1, LargeChange = 0.5, TickFrequency = 0.1, IsSnapToTickEnabled = true, MinWidth = 200 };
     private readonly Slider _pitch = new() { Minimum = 0.5, Maximum = 2.0, SmallChange = 0.1, LargeChange = 0.5, TickFrequency = 0.1, IsSnapToTickEnabled = true, MinWidth = 200 };
@@ -78,8 +78,9 @@ public sealed class ReaderPage : PageBase
 
         // Satır / Paragraf / İmleç İşlemleri Düğmeleri (Metin kutusundan hemen sonra Tab ile gelir)
         var lineTools = new WrapPanel();
+        _btnSpeakCurrent = Ui.Button(App.Repo.Settings.TtsReadMode == "Paragraf" ? "Bulunulan Paragrafı Seslendir" : "Bulunulan Satırı Seslendir", SpeakCurrentLine, "Enter tuşu");
         lineTools.Children.Add(Ui.Button("Önceki Paragraf", GoPreviousParagraph, "Ctrl+Yukarı ok"));
-        lineTools.Children.Add(Ui.Button("Bulunulan Satırı Seslendir", SpeakCurrentLine, "Enter tuşu"));
+        lineTools.Children.Add(_btnSpeakCurrent);
         lineTools.Children.Add(Ui.Button("Sonraki Paragraf", GoNextParagraph, "Ctrl+Aşağı ok"));
         lineTools.Children.Add(Ui.Button("Bulunulan Satırı Kopyala", CopyCurrentLine, "Control C"));
         lineTools.Children.Add(Ui.Button("Bulunulan Satıra Yer İmi Ekle", AddBookmark, "Control B"));
@@ -170,6 +171,7 @@ public sealed class ReaderPage : PageBase
     public override async void OnShown()
     {
         SyncControls();
+        App.Repo.SettingsChanged += OnRepoSettingsChanged;
         App.Tts.SpeakingChanged += OnSpeakingChanged;
         App.Tts.SentenceChanged += OnSentenceChanged;
         App.Tts.PageCompleted += OnPageCompleted;
@@ -203,6 +205,7 @@ public sealed class ReaderPage : PageBase
 
     public override void OnHidden()
     {
+        App.Repo.SettingsChanged -= OnRepoSettingsChanged;
         App.Tts.Stop();
         App.Tts.SpeakingChanged -= OnSpeakingChanged;
         App.Tts.SentenceChanged -= OnSentenceChanged;
@@ -261,31 +264,77 @@ public sealed class ReaderPage : PageBase
         return (full.Substring(lineStart, l).Trim('\r', ' '), lineStart, l);
     }
 
+    private (string text, int start, int length) GetCurrentParagraph()
+    {
+        if (_text.SelectionLength > 0)
+        {
+            return (_text.SelectedText.Trim(), _text.SelectionStart, _text.SelectionLength);
+        }
+
+        if (string.IsNullOrEmpty(_text.Text)) return ("", 0, 0);
+
+        string text = _text.Text;
+        int caret = Math.Clamp(_text.CaretIndex, 0, text.Length);
+
+        // Önceki çift satır sonunu (\r\n\r\n veya \n\n) bul
+        int paraStart = 0;
+        var prevMatches = Regex.Matches(text.Substring(0, caret), @"\r?\n\s*\r?\n", RegexOptions.RightToLeft);
+        if (prevMatches.Count > 0)
+        {
+            paraStart = prevMatches[0].Index + prevMatches[0].Length;
+        }
+
+        // Sonraki çift satır sonunu bul
+        int paraEnd = text.Length;
+        var nextMatch = Regex.Match(text.Substring(caret), @"\r?\n\s*\r?\n");
+        if (nextMatch.Success)
+        {
+            paraEnd = caret + nextMatch.Index;
+        }
+
+        while (paraStart < paraEnd && (text[paraStart] == '\r' || text[paraStart] == '\n' || text[paraStart] == ' '))
+            paraStart++;
+        while (paraEnd > paraStart && (text[paraEnd - 1] == '\r' || text[paraEnd - 1] == '\n' || text[paraEnd - 1] == ' '))
+            paraEnd--;
+
+        int len = Math.Max(0, paraEnd - paraStart);
+        string result = len > 0 ? text.Substring(paraStart, len).Trim() : "";
+
+        if (string.IsNullOrWhiteSpace(result))
+        {
+            return GetCurrentLineOrSelection();
+        }
+
+        return (result, paraStart, len);
+    }
+
     private void SpeakCurrentLine()
     {
-        var (line, _, _) = GetCurrentLineOrSelection();
-        if (string.IsNullOrWhiteSpace(line))
+        bool isParaMode = App.Repo.Settings.TtsReadMode == "Paragraf";
+        var (textToSpeak, _, _) = isParaMode ? GetCurrentParagraph() : GetCurrentLineOrSelection();
+        if (string.IsNullOrWhiteSpace(textToSpeak))
         {
-            App.Announce("Bu satır boş");
+            App.Announce(isParaMode ? "Bu paragraf boş" : "Bu satır boş");
             return;
         }
         App.Tts.Stop();
-        _ = App.Tts.PreviewAsync(line, App.Tts.ActiveEngine, App.Tts.ActiveVoiceId);
+        _ = App.Tts.PreviewAsync(textToSpeak, App.Tts.ActiveEngine, App.Tts.ActiveVoiceId);
     }
 
     private void CopyCurrentLine()
     {
-        var (line, _, _) = GetCurrentLineOrSelection();
-        if (string.IsNullOrWhiteSpace(line))
+        bool isParaMode = App.Repo.Settings.TtsReadMode == "Paragraf";
+        var (textToCopy, _, _) = isParaMode ? GetCurrentParagraph() : GetCurrentLineOrSelection();
+        if (string.IsNullOrWhiteSpace(textToCopy))
         {
-            App.Announce("Kopyalanacak satır boş");
+            App.Announce(isParaMode ? "Kopyalanacak paragraf boş" : "Kopyalanacak satır boş");
             return;
         }
         try
         {
-            Clipboard.SetText(line);
-            Host.SetStatus("Satır panoya kopyalandı.", true);
-            App.Announce("Satır kopyalandı");
+            Clipboard.SetText(textToCopy);
+            Host.SetStatus(isParaMode ? "Paragraf panoya kopyalandı." : "Satır panoya kopyalandı.", true);
+            App.Announce(isParaMode ? "Paragraf kopyalandı" : "Satır kopyalandı");
         }
         catch (Exception e)
         {
@@ -296,7 +345,8 @@ public sealed class ReaderPage : PageBase
     private void ReadFromCurrentLine()
     {
         if (_doc == null) return;
-        var (_, start, _) = GetCurrentLineOrSelection();
+        bool isParaMode = App.Repo.Settings.TtsReadMode == "Paragraf";
+        var (_, start, _) = isParaMode ? GetCurrentParagraph() : GetCurrentLineOrSelection();
         var sentences = App.Tts.Sentences;
         int targetIdx = 0;
         for (int i = 0; i < sentences.Count; i++)
@@ -308,7 +358,9 @@ public sealed class ReaderPage : PageBase
             }
         }
         App.Tts.StartSpeaking(targetIdx);
-        App.Announce("Bu satırdan itibaren sesli okuma başlatıldı");
+        App.Announce(isParaMode
+            ? "Bu paragraftan itibaren sesli okuma başlatıldı"
+            : "Bu satırdan itibaren sesli okuma başlatıldı");
     }
 
     private void GoNextParagraph()
@@ -317,19 +369,20 @@ public sealed class ReaderPage : PageBase
         int caret = _text.CaretIndex;
         string text = _text.Text;
 
-        int nextLine = text.IndexOf('\n', caret);
-        if (nextLine >= 0)
+        // Bulunulan konumdan sonraki paragraf ayrımını (\r\n\r\n veya \n\n) bul
+        var m = Regex.Match(text.Substring(caret), @"\r?\n\s*\r?\n");
+        if (m.Success)
         {
-            int target = nextLine + 1;
-            while (target < text.Length && (text[target] == '\r' || text[target] == '\n'))
+            int target = caret + m.Index + m.Length;
+            while (target < text.Length && (text[target] == '\r' || text[target] == '\n' || text[target] == ' '))
                 target++;
 
             if (target < text.Length)
             {
                 FocusTextAt(target);
-                var (para, _, _) = GetCurrentLineOrSelection();
+                var (para, _, _) = GetCurrentParagraph();
                 if (!string.IsNullOrWhiteSpace(para))
-                    App.Announce(para.Length > 80 ? para[..80] + "…" : para);
+                    App.Announce(para.Length > 120 ? para[..120] + "…" : para);
                 return;
             }
         }
@@ -365,25 +418,26 @@ public sealed class ReaderPage : PageBase
             return;
         }
 
-        int prevLine = text.LastIndexOf('\n', Math.Max(0, caret - 2));
-        if (prevLine >= 0)
+        // Bulunulan konumdan önceki paragraf ayrımını bul
+        int searchLen = Math.Max(0, caret - 2);
+        var matches = Regex.Matches(text.Substring(0, searchLen), @"\r?\n\s*\r?\n", RegexOptions.RightToLeft);
+        if (matches.Count > 0)
         {
-            int start = text.LastIndexOf('\n', prevLine - 1);
-            int target = start < 0 ? 0 : start + 1;
-            while (target < text.Length && (text[target] == '\r' || text[target] == '\n'))
+            int target = matches[0].Index + matches[0].Length;
+            while (target < text.Length && (text[target] == '\r' || text[target] == '\n' || text[target] == ' '))
                 target++;
 
             FocusTextAt(target);
-            var (para, _, _) = GetCurrentLineOrSelection();
+            var (para, _, _) = GetCurrentParagraph();
             if (!string.IsNullOrWhiteSpace(para))
-                App.Announce(para.Length > 80 ? para[..80] + "…" : para);
+                App.Announce(para.Length > 120 ? para[..120] + "…" : para);
             return;
         }
 
         FocusTextAt(0);
-        var (firstPara, _, _) = GetCurrentLineOrSelection();
+        var (firstPara, _, _) = GetCurrentParagraph();
         if (!string.IsNullOrWhiteSpace(firstPara))
-            App.Announce(firstPara.Length > 80 ? firstPara[..80] + "…" : firstPara);
+            App.Announce(firstPara.Length > 120 ? firstPara[..120] + "…" : firstPara);
     }
 
     private void ToggleReadMode()
@@ -391,22 +445,47 @@ public sealed class ReaderPage : PageBase
         var s = App.Repo.Settings;
         s.TtsReadMode = s.TtsReadMode == "Paragraf" ? "Cümle" : "Paragraf";
         App.Repo.UpdateSettings(s);
-        _btnReadMode.Content = $"Okuma Modu: {s.TtsReadMode}";
-        Ui.Name(_btnReadMode, $"Okuma Modu: {s.TtsReadMode}");
+        UpdateReadModeUi();
         App.Tts.LoadPageText(_text.Text, 0);
         App.Announce($"Okuma modu {s.TtsReadMode} olarak ayarlandı");
+    }
+
+    private void UpdateReadModeUi()
+    {
+        var s = App.Repo.Settings;
+        bool isPara = s.TtsReadMode == "Paragraf";
+        _btnReadMode.Content = $"Okuma Modu: {s.TtsReadMode}";
+        Ui.Name(_btnReadMode, $"Okuma Modu: {s.TtsReadMode}");
+        if (_btnSpeakCurrent != null)
+        {
+            _btnSpeakCurrent.Content = isPara ? "Bulunulan Paragrafı Seslendir" : "Bulunulan Satırı Seslendir";
+            Ui.Name(_btnSpeakCurrent, isPara ? "Bulunulan Paragrafı Seslendir" : "Bulunulan Satırı Seslendir");
+        }
+    }
+
+    private void OnRepoSettingsChanged()
+    {
+        Dispatcher.InvokeAsync(() =>
+        {
+            UpdateReadModeUi();
+            if (_doc != null && !string.IsNullOrEmpty(_text.Text))
+            {
+                App.Tts.LoadPageText(_text.Text, App.Tts.CurrentIndex);
+            }
+        });
     }
 
     private ContextMenu BuildContextMenu()
     {
         var m = new ContextMenu();
         void Add(string h, Action a) { var i = new MenuItem { Header = h }; i.Click += (_, _) => a(); m.Items.Add(i); }
+        bool isPara = App.Repo.Settings.TtsReadMode == "Paragraf";
         Add("Önceki Paragraf (Ctrl+Yukarı Ok)", GoPreviousParagraph);
         Add("Sonraki Paragraf (Ctrl+Aşağı Ok)", GoNextParagraph);
-        Add("Bulunulan Satırı Seslendir (Enter)", SpeakCurrentLine);
-        Add("Bulunulan Satırı Kopyala (Ctrl+C)", CopyCurrentLine);
+        Add(isPara ? "Bulunulan Paragrafı Seslendir (Enter)" : "Bulunulan Satırı Seslendir (Enter)", SpeakCurrentLine);
+        Add(isPara ? "Bulunulan Paragrafı Kopyala (Ctrl+C)" : "Bulunulan Satırı Kopyala (Ctrl+C)", CopyCurrentLine);
         Add("Bulunulan Satıra Yer İmi Ekle (Ctrl+B)", AddBookmark);
-        Add("Buradan Okumaya Başla (Ctrl+Enter)", ReadFromCurrentLine);
+        Add(isPara ? "Bu Paragraftan İtibaren Okumaya Başla (Ctrl+Enter)" : "Bu Satırdan İtibaren Okumaya Başla (Ctrl+Enter)", ReadFromCurrentLine);
         m.Items.Add(new Separator());
         Add("Tüm Sayfa Metnini Kopyala", CopyPage);
         return m;
@@ -509,11 +588,14 @@ public sealed class ReaderPage : PageBase
 
         _loading = false;
         _page = page;
-        // Windows TextBox içinde boş satırlar (\r\n\r\n) bulunduğunda, WPF'in UI Automation
-        // (TextPattern.ExpandToEnclosingUnit) motorundaki bilinen bir hata nedeniyle boş satırdaki
-        // imleç sonraki satırın metnini de içerir ve NVDA sonraki satırı peş peşe 2 kez okur.
-        // Bu nedenle ardışık yeni satırlar tek bir \r\n olarak normalize edilir.
-        var normalized = Regex.Replace(text.Replace("\r\n", "\n").Replace('\r', '\n'), @"\n+", "\r\n").Trim();
+        // Satır sonlarını Windows standardı \r\n olarak normalize et.
+        // Paragraf ayrımlarını (\r\n\r\n) koru; 3 ve daha fazla ardışık satır sonlarını çift satır sonuna (\r\n\r\n) indir.
+        var cleanNewlines = text.Replace("\r\n", "\n").Replace('\r', '\n');
+        cleanNewlines = Regex.Replace(cleanNewlines, @"\n{3,}", "\n\n");
+        var normalized = cleanNewlines.Replace("\n\n", "___PARABREAK___")
+                                      .Replace("\n", "\r\n")
+                                      .Replace("___PARABREAK___", "\r\n\r\n")
+                                      .Trim();
         _text.Text = normalized;
         App.Tts.LoadPageText(normalized);
 

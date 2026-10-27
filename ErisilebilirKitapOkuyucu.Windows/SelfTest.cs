@@ -219,6 +219,11 @@ public static class SelfTest
         var s = TtsService.Split(text);
         Check("Cümle bölme ve vurgulama konumları", s.Count == 4 && s.All(x => text.Substring(x.Start, x.Length) == x.Text), string.Join(" | ", s.Select(x => x.Text)));
 
+        // Paragraf bölme ve konumları
+        var pText = "Birinci paragraf ilk cümle. Birinci paragraf ikinci cümle.\r\n\r\nİkinci paragraf tek cümle.\r\n\r\nÜçüncü paragraf son cümle.";
+        var pSplits = TtsService.Split(pText, true);
+        Check("Paragraf bölme ve vurgulama konumları", pSplits.Count == 3 && pSplits.All(x => pText.Substring(x.Start, x.Length) == x.Text), $"Paragraf sayısı: {pSplits.Count} => " + string.Join(" || ", pSplits.Select(x => x.Text)));
+
         // TtsService döngüsü: cümle olayları + sayfa sonu
         var events = new List<int>(); var completed = false;
         void OnS(int i) => events.Add(i); void OnC() => completed = true;

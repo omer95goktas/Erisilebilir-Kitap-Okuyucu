@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using System.Text.RegularExpressions;
 using NAudio.Wave;
 
@@ -62,24 +63,118 @@ public sealed class TtsService : IDisposable
 
         if (paragraphMode)
         {
-            int pos = 0;
-            // Paragraflar: Çift satır sonu (\n\n veya \r\n\r\n) ile veya metin satırları ile ayrılmış paragrafları bul
-            var paras = Regex.Matches(text, @"[^\r\n]+(?:\r?\n(?!\r?\n)[^\r\n]+)*");
-            foreach (Match p in paras)
+            // 1. Önce çift satır sonu ile ayrılmış paragrafları ara (\r\n\r\n veya \n\n)
+            var matches = Regex.Matches(text, @"(?:^|\r?\n\s*\r?\n)([\s\S]*?)(?=(?:\r?\n\s*\r?\n)|$)");
+            var rawList = new List<(string text, int start, int length)>();
+
+            foreach (Match m in matches)
             {
-                var clean = p.Value.Trim();
-                if (clean.Length == 0) continue;
-                var idx = text.IndexOf(clean, pos, StringComparison.Ordinal);
-                if (idx < 0) idx = text.IndexOf(clean, StringComparison.Ordinal);
-                if (idx < 0) idx = pos;
-                result.Add(new Sentence(clean, idx, clean.Length));
-                pos = idx + clean.Length;
+                var g = m.Groups[1];
+                var raw = g.Value;
+                var trimmed = raw.Trim();
+                if (trimmed.Length == 0) continue;
+
+                int leadingWs = 0;
+                while (leadingWs < raw.Length && char.IsWhiteSpace(raw[leadingWs])) leadingWs++;
+                int start = g.Index + leadingWs;
+
+                rawList.Add((trimmed, start, trimmed.Length));
             }
+
+            // 2. Eğer metinde çift satır sonu yoksa ve metin çok satırlıysa (tek satır sonlu PDF veya metinler):
+            if (rawList.Count <= 1 && (text.Contains('\n') || text.Contains('\r')))
+            {
+                rawList.Clear();
+                var lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+                var currentPara = new StringBuilder();
+                int paraStart = -1;
+                int currentSearchIdx = 0;
+
+                for (int i = 0; i < lines.Length; i++)
+                {
+                    var line = lines[i];
+                    var trimmed = line.Trim();
+                    int lineIdx = text.IndexOf(line, currentSearchIdx, StringComparison.Ordinal);
+                    if (lineIdx < 0) lineIdx = currentSearchIdx;
+                    currentSearchIdx = lineIdx + line.Length;
+
+                    if (string.IsNullOrWhiteSpace(trimmed))
+                    {
+                        if (currentPara.Length > 0)
+                        {
+                            var pStr = currentPara.ToString().Trim();
+                            rawList.Add((pStr, paraStart, pStr.Length));
+                            currentPara.Clear();
+                            paraStart = -1;
+                        }
+                        continue;
+                    }
+
+                    if (paraStart < 0) paraStart = lineIdx;
+                    if (currentPara.Length > 0) currentPara.Append(' ');
+                    currentPara.Append(trimmed);
+
+                    bool endsWithPunct = Regex.IsMatch(trimmed, @"[.!?…:][""'»”]?$");
+                    bool nextIndented = (i + 1 < lines.Length) && (lines[i + 1].StartsWith("    ") || lines[i + 1].StartsWith("\t"));
+                    bool nextEmpty = (i + 1 < lines.Length) && string.IsNullOrWhiteSpace(lines[i + 1]);
+
+                    if ((endsWithPunct && (currentPara.Length >= 200 || nextIndented || nextEmpty)) || currentPara.Length >= 1200)
+                    {
+                        var pStr = currentPara.ToString().Trim();
+                        rawList.Add((pStr, paraStart, pStr.Length));
+                        currentPara.Clear();
+                        paraStart = -1;
+                    }
+                }
+
+                if (currentPara.Length > 0)
+                {
+                    var pStr = currentPara.ToString().Trim();
+                    rawList.Add((pStr, paraStart, pStr.Length));
+                }
+            }
+
+            // 3. Çok uzun paragrafları (1200+ karakter) TTS motorlarının takılmaması için cümle sınırlarından böl
+            foreach (var item in rawList)
+            {
+                if (item.text.Length <= 1200)
+                {
+                    result.Add(new Sentence(item.text, item.start, item.length));
+                }
+                else
+                {
+                    var subSentences = Regex.Split(item.text, @"(?<=[.!?…])\s+");
+                    var chunk = new StringBuilder();
+                    int chunkStart = item.start;
+                    int offset = 0;
+
+                    foreach (var s in subSentences)
+                    {
+                        if (chunk.Length + s.Length > 900 && chunk.Length > 0)
+                        {
+                            var cText = chunk.ToString().Trim();
+                            result.Add(new Sentence(cText, chunkStart, cText.Length));
+                            chunk.Clear();
+                            chunkStart = item.start + offset;
+                        }
+                        if (chunk.Length > 0) chunk.Append(' ');
+                        chunk.Append(s);
+                        offset += s.Length + 1;
+                    }
+                    if (chunk.Length > 0)
+                    {
+                        var cText = chunk.ToString().Trim();
+                        result.Add(new Sentence(cText, chunkStart, cText.Length));
+                    }
+                }
+            }
+
             return result.Count > 0 ? result : new List<Sentence> { new(text.Trim(), 0, text.Trim().Length) };
         }
 
+        // Cümle Cümle Okuma Modu
         int posSentence = 0;
-        foreach (Match para in Regex.Matches(text, @"[^\n]+(?:\n(?!\n)[^\n]*)*"))
+        foreach (Match para in Regex.Matches(text, @"[^\r\n]+(?:\r?\n(?!\r?\n)[^\r\n]*)*"))
         {
             foreach (var part in Regex.Split(para.Value, @"(?<=[.!?…])\s+"))
             {
