@@ -158,16 +158,25 @@ public sealed class SettingsPage : PageBase
         audioGroup.Content = audio;
         stack.Children.Add(audioGroup);
 
-        // ---- Görünüm
-        var viewGroup = new GroupBox { Header = "Görünüm" };
-        Ui.Name(viewGroup, "Görünüm");
+        // ---- Görünüm ve Tema
+        var viewGroup = new GroupBox { Header = "Görünüm ve Tema" };
+        Ui.Name(viewGroup, "Görünüm ve Tema");
         var view = new StackPanel();
-        var hc = new CheckBox { Content = "Yüksek karşıtlık modu (siyah zemin, sarı vurgu)", IsChecked = s.HighContrastMode };
-        hc.Checked += (_, _) => Update(x => x.HighContrastMode = true);
-        hc.Unchecked += (_, _) => Update(x => x.HighContrastMode = false);
+
+        view.Children.Add(Ui.Text("Arayüz Teması", "SubHeading"));
+        var themeBox = new StackPanel { Margin = new Thickness(0, 2, 0, 8) };
+        themeBox.Children.Add(Ui.Radio("Sistem Teması (Windows ayarlarını takip eder)", "theme_radio", () => SetTheme("Sistem"), s.AppTheme == "Sistem"));
+        themeBox.Children.Add(Ui.Radio("Açık Tema (Net, koyu siyah metinler)", "theme_radio", () => SetTheme("Acik"), s.AppTheme == "Acik"));
+        themeBox.Children.Add(Ui.Radio("Koyu Tema (Göz yormayan modern koyu zemin)", "theme_radio", () => SetTheme("Koyu"), s.AppTheme == "Koyu"));
+        view.Children.Add(themeBox);
+
+        var hc = new CheckBox { Content = "Yüksek karşıtlık modu (siyah zemin, sarı vurgu)", IsChecked = s.HighContrastMode, Margin = new Thickness(0, 6, 0, 4) };
+        hc.Checked += (_, _) => { Update(x => x.HighContrastMode = true); ThemeManager.Apply(App.Repo.Settings); };
+        hc.Unchecked += (_, _) => { Update(x => x.HighContrastMode = false); ThemeManager.Apply(App.Repo.Settings); };
         view.Children.Add(hc);
+
         view.Children.Add(Slider("Yazı boyutu", s.FontSizeSp, 14, 40, 2, v => Update(x => x.FontSizeSp = (int)v), v => $"{(int)v} punto"));
-        view.Children.Add(Ui.Text("Windows yüksek karşıtlık teması açıkken uygulama sistem renklerini kullanır."));
+        view.Children.Add(Ui.Text("Windows sistem yüksek karşıtlık teması aktifken uygulama doğrudan sistem renklerini kullanır."));
         viewGroup.Content = view;
         stack.Children.Add(viewGroup);
 
@@ -229,6 +238,20 @@ public sealed class SettingsPage : PageBase
         var s = App.Repo.Settings;
         change(s);
         App.Repo.UpdateSettings(s);
+    }
+
+    private void SetTheme(string theme)
+    {
+        if (_syncing) return;
+        Update(x => x.AppTheme = theme);
+        ThemeManager.Apply(App.Repo.Settings);
+        var label = theme switch
+        {
+            "Koyu" => "Koyu Tema",
+            "Acik" => "Açık Tema",
+            _ => "Sistem Teması"
+        };
+        App.Announce($"Tema değiştirildi: {label}");
     }
 
     private void SetEngine(string? id)

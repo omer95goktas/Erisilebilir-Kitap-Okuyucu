@@ -109,69 +109,146 @@ public static class ThemeManager
     private static SolidColorBrush B(string hex) => (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
     private static SolidColorBrush B(Color c) => new(c);
 
+    public static bool IsWindowsDarkTheme()
+    {
+        try
+        {
+            using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(
+                @"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize");
+            if (key != null)
+            {
+                var val = key.GetValue("AppsUseLightTheme");
+                if (val is int intVal) return intVal == 0;
+            }
+        }
+        catch { }
+        return false;
+    }
+
     public static void Apply(AppSettings s)
     {
         var r = Application.Current.Resources;
+
+        // 1. Windows Sistem Yüksek Karşıtlık Teması (Aktifse sistem renklerini kullanır)
         if (SystemParameters.HighContrast)
         {
-            // Windows yüksek karşıtlık teması etkinse sistem renklerine tam uyum
-            r["AppBg"] = B(SystemColors.WindowColor);
-            r["AppFg"] = B(SystemColors.WindowTextColor);
-            r["SubTextFg"] = B(SystemColors.WindowTextColor);
-            r["PanelBg"] = B(SystemColors.WindowColor);
-            r["PanelHeaderBg"] = B(SystemColors.WindowColor);
-            r["AccentBg"] = B(SystemColors.HighlightColor);
-            r["AccentHover"] = B(SystemColors.HighlightColor);
-            r["AccentFg"] = B(SystemColors.HighlightTextColor);
-            r["LineBrush"] = B(SystemColors.WindowTextColor);
-            r["ButtonBg"] = B(SystemColors.WindowColor);
-            r["ButtonHoverBg"] = B(SystemColors.HighlightColor);
-            r["ButtonBorder"] = B(SystemColors.WindowTextColor);
-            r["FocusBrush"] = B(SystemColors.HotTrackColor);
-            r["DisabledFg"] = B(SystemColors.GrayTextColor);
-            r["BadgeBg"] = B(SystemColors.WindowColor);
-            r["BadgeFg"] = B(SystemColors.WindowTextColor);
+            ApplySystemHighContrast(r);
         }
+        // 2. Uygulama İçi Manuel Yüksek Karşıtlık (Siyah Zemin, Sarı Vurgu)
         else if (s.HighContrastMode)
         {
-            // Manuel Yüksek Karşıtlık (Siyah Zemin, Sarı Vurgu)
-            r["AppBg"] = B("#000000");
-            r["AppFg"] = B("#FFFFFF");
-            r["SubTextFg"] = B("#DDDDDD");
-            r["PanelBg"] = B("#121212");
-            r["PanelHeaderBg"] = B("#181818");
-            r["AccentBg"] = B("#FFD600");
-            r["AccentHover"] = B("#FFE033");
-            r["AccentFg"] = B("#000000");
-            r["LineBrush"] = B("#888888");
-            r["ButtonBg"] = B("#1E1E1E");
-            r["ButtonHoverBg"] = B("#FFD600");
-            r["ButtonBorder"] = B("#BDBDBD");
-            r["FocusBrush"] = B("#00E5FF");
-            r["DisabledFg"] = B("#757575");
-            r["BadgeBg"] = B("#2A2A2A");
-            r["BadgeFg"] = B("#FFD600");
+            ApplyManualHighContrast(r);
         }
+        // 3. Modern Temalar (Sistem / Açık / Koyu)
         else
         {
-            // Modern Aydınlık / Fluent Tasarım (Gözü yormayan, zarif ve modern)
-            r["AppBg"] = B("#F8FAFC");
-            r["AppFg"] = B("#0F172A");
-            r["SubTextFg"] = B("#475569");
-            r["PanelBg"] = B("#FFFFFF");
-            r["PanelHeaderBg"] = B("#FFFFFF");
-            r["AccentBg"] = B("#2563EB");
-            r["AccentHover"] = B("#1D4ED8");
-            r["AccentFg"] = B("#FFFFFF");
-            r["LineBrush"] = B("#E2E8F0");
-            r["ButtonBg"] = B("#FFFFFF");
-            r["ButtonHoverBg"] = B("#F1F5F9");
-            r["ButtonBorder"] = B("#CBD5E1");
-            r["FocusBrush"] = B("#2563EB");
-            r["DisabledFg"] = B("#94A3B8");
-            r["BadgeBg"] = B("#EFF6FF");
-            r["BadgeFg"] = B("#1D4ED8");
+            bool isDark;
+            var mode = s.AppTheme ?? "Sistem";
+            if (mode.Equals("Koyu", StringComparison.OrdinalIgnoreCase))
+            {
+                isDark = true;
+            }
+            else if (mode.Equals("Acik", StringComparison.OrdinalIgnoreCase))
+            {
+                isDark = false;
+            }
+            else // "Sistem"
+            {
+                isDark = IsWindowsDarkTheme();
+            }
+
+            if (isDark)
+            {
+                ApplyModernDark(r);
+            }
+            else
+            {
+                ApplyModernLight(r);
+            }
         }
+
         r["BaseFontSize"] = (double)Math.Clamp(s.FontSizeSp, 14, 40);
+    }
+
+    private static void ApplySystemHighContrast(ResourceDictionary r)
+    {
+        r["AppBg"] = B(SystemColors.WindowColor);
+        r["AppFg"] = B(SystemColors.WindowTextColor);
+        r["SubTextFg"] = B(SystemColors.WindowTextColor);
+        r["PanelBg"] = B(SystemColors.WindowColor);
+        r["PanelHeaderBg"] = B(SystemColors.WindowColor);
+        r["AccentBg"] = B(SystemColors.HighlightColor);
+        r["AccentHover"] = B(SystemColors.HighlightColor);
+        r["AccentFg"] = B(SystemColors.HighlightTextColor);
+        r["LineBrush"] = B(SystemColors.WindowTextColor);
+        r["ButtonBg"] = B(SystemColors.WindowColor);
+        r["ButtonHoverBg"] = B(SystemColors.HighlightColor);
+        r["ButtonBorder"] = B(SystemColors.WindowTextColor);
+        r["FocusBrush"] = B(SystemColors.HotTrackColor);
+        r["DisabledFg"] = B(SystemColors.GrayTextColor);
+        r["BadgeBg"] = B(SystemColors.WindowColor);
+        r["BadgeFg"] = B(SystemColors.WindowTextColor);
+    }
+
+    private static void ApplyManualHighContrast(ResourceDictionary r)
+    {
+        r["AppBg"] = B("#000000");
+        r["AppFg"] = B("#FFFFFF");
+        r["SubTextFg"] = B("#DDDDDD");
+        r["PanelBg"] = B("#121212");
+        r["PanelHeaderBg"] = B("#181818");
+        r["AccentBg"] = B("#FFD600");
+        r["AccentHover"] = B("#FFE033");
+        r["AccentFg"] = B("#000000");
+        r["LineBrush"] = B("#888888");
+        r["ButtonBg"] = B("#1E1E1E");
+        r["ButtonHoverBg"] = B("#FFD600");
+        r["ButtonBorder"] = B("#BDBDBD");
+        r["FocusBrush"] = B("#00E5FF");
+        r["DisabledFg"] = B("#757575");
+        r["BadgeBg"] = B("#2A2A2A");
+        r["BadgeFg"] = B("#FFD600");
+    }
+
+    private static void ApplyModernLight(ResourceDictionary r)
+    {
+        // Net, soluk olmayan koyu siyah metinler ile modern aydınlık tema
+        r["AppBg"] = B("#FFFFFF");
+        r["AppFg"] = B("#000000");           // Tam okunaklı koyu siyah
+        r["SubTextFg"] = B("#1E293B");      // Net koyu gri/siyah
+        r["PanelBg"] = B("#F8FAFC");
+        r["PanelHeaderBg"] = B("#F1F5F9");
+        r["AccentBg"] = B("#2563EB");
+        r["AccentHover"] = B("#1D4ED8");
+        r["AccentFg"] = B("#FFFFFF");
+        r["LineBrush"] = B("#CBD5E1");
+        r["ButtonBg"] = B("#FFFFFF");
+        r["ButtonHoverBg"] = B("#F1F5F9");
+        r["ButtonBorder"] = B("#94A3B8");
+        r["FocusBrush"] = B("#2563EB");
+        r["DisabledFg"] = B("#64748B");
+        r["BadgeBg"] = B("#DBEAFE");
+        r["BadgeFg"] = B("#1E40AF");
+    }
+
+    private static void ApplyModernDark(ResourceDictionary r)
+    {
+        // Yüksek Karşıtlıktan bağımsız, gözü yormayan modern koyu slate tema
+        r["AppBg"] = B("#0F172A");           // Derin koyu zemin
+        r["AppFg"] = B("#F8FAFC");           // Net parlak beyaz metin
+        r["SubTextFg"] = B("#94A3B8");      // Okunaklı açık gri
+        r["PanelBg"] = B("#1E293B");        // Yükseltilmiş slate panel
+        r["PanelHeaderBg"] = B("#1E293B");
+        r["AccentBg"] = B("#3B82F6");       // Canlı mavi
+        r["AccentHover"] = B("#60A5FA");
+        r["AccentFg"] = B("#FFFFFF");
+        r["LineBrush"] = B("#334155");      // Zarif sınır çizgisi
+        r["ButtonBg"] = B("#1E293B");
+        r["ButtonHoverBg"] = B("#334155");
+        r["ButtonBorder"] = B("#475569");
+        r["FocusBrush"] = B("#60A5FA");
+        r["DisabledFg"] = B("#64748B");
+        r["BadgeBg"] = B("#1E3A8A");
+        r["BadgeFg"] = B("#93C5FD");
     }
 }

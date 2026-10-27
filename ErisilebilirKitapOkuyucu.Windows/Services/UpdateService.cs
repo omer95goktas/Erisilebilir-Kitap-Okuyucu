@@ -26,7 +26,7 @@ public class GitHubReleaseInfo
 
 public static class UpdateService
 {
-    public const string CurrentVersion = "1.0.2";
+    public const string CurrentVersion = "1.0.3";
     public const string GitHubRepo = "omer95goktas/Erisilebilir-Kitap-Okuyucu";
     private static readonly HttpClient Http = new()
     {
@@ -137,12 +137,11 @@ public static class UpdateService
 
         if (root.TryGetProperty("assets", out var assets) && assets.ValueKind == JsonValueKind.Array)
         {
-            // Öncelik: Kurulum.exe
+            // 1. Öncelik: ErisilebilirKitapOkuyucu.exe
             foreach (var asset in assets.EnumerateArray())
             {
                 var aName = asset.TryGetProperty("name", out var an) ? an.GetString() ?? "" : "";
-                if (aName.EndsWith("_Kurulum.exe", StringComparison.OrdinalIgnoreCase) ||
-                    aName.Equals("ErisilebilirKitapOkuyucu_Kurulum.exe", StringComparison.OrdinalIgnoreCase))
+                if (aName.Equals("ErisilebilirKitapOkuyucu.exe", StringComparison.OrdinalIgnoreCase))
                 {
                     info.FileName = aName;
                     info.DownloadUrl = asset.TryGetProperty("browser_download_url", out var u) ? u.GetString() ?? "" : "";
@@ -151,7 +150,7 @@ public static class UpdateService
                 }
             }
 
-            // Alternatif: Genel .exe
+            // 2. Öncelik: Kurulum.exe veya herhangi bir .exe
             if (string.IsNullOrEmpty(info.DownloadUrl))
             {
                 foreach (var asset in assets.EnumerateArray())

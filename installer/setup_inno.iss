@@ -4,7 +4,7 @@
 ; ===================================================================
 
 #define MyAppName "Erişilebilir Kitap Okuyucu"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "omergoktas.net"
 #define MyAppURL "https://omergoktas.net"
 #define MyAppExeName "ErisilebilirKitapOkuyucu.exe"
@@ -27,7 +27,7 @@ DisableProgramGroupPage=yes
 
 ; Çıktı Ayarları
 OutputDir=..\release_artifacts
-OutputBaseFilename=ErisilebilirKitapOkuyucu_Kurulum
+OutputBaseFilename=ErisilebilirKitapOkuyucu
 Compression=lzma2/max
 SolidCompression=yes
 

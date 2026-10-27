@@ -86,6 +86,8 @@ public class AppSettings
     public float TtsPitch { get; set; } = 1.0f;
     public bool AutoNextPage { get; set; } = true;
     public bool HighContrastMode { get; set; } = false;
+    /// <summary>"Sistem", "Acik" veya "Koyu".</summary>
+    public string AppTheme { get; set; } = "Sistem";
     public int FontSizeSp { get; set; } = 18;
     public float AudioSpeed { get; set; } = 1.0f;
     public float AudioVolume { get; set; } = 1.0f;
