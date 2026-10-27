@@ -183,6 +183,16 @@ public sealed class SettingsPage : PageBase
         linksPanel.Children.Add(Ui.Button("E-Posta Gönder", () => OpenUrl("mailto:mail@omergoktas.net"), "Varsayılan e-posta istemcinizi açarak mail@omergoktas.net adresine ileti hazırlar"));
         linksPanel.Children.Add(Ui.Button("Web Sitesini Ziyaret Et", () => OpenUrl("https://omergoktas.net"), "omergoktas.net web sitesini tarayıcınızda açar"));
         linksPanel.Children.Add(Ui.Button("Gizlilik Politikası", () => new PrivacyDialog(Host).ShowDialog(), "Uygulamanın gizlilik politikasını görüntüler"));
+        
+        if (UpdateService.IsRunningAsMsix())
+        {
+            aboutPanel.Children.Add(Ui.Text("Güncellemeler: Microsoft Store tarafından otomatik olarak yönetilmektedir."));
+        }
+        else
+        {
+            linksPanel.Children.Add(Ui.Button("Güncellemeleri Denetle", async () => await UpdateService.CheckForUpdatesAsync(isManual: true), "GitHub üzerindeki yeni sürümleri kontrol eder"));
+        }
+
         aboutPanel.Children.Add(linksPanel);
 
         aboutGroup.Content = aboutPanel;

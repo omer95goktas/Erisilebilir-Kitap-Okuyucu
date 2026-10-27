@@ -4,7 +4,7 @@
 ; ===================================================================
 
 #define MyAppName "Erişilebilir Kitap Okuyucu"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "omergoktas.net"
 #define MyAppURL "https://omergoktas.net"
 #define MyAppExeName "ErisilebilirKitapOkuyucu.exe"
@@ -19,9 +19,9 @@ AppPublisherURL={#MyAppURL}
 AppSupportURL={#MyAppURL}
 AppUpdatesURL={#MyAppURL}
 
-; Yönetici yetkisi gerektirmeyen kullanıcı profili kurulumu (Non-Admin / per-user)
-PrivilegesRequired=lowest
-DefaultDirName={userpf}\Programs\ErisilebilirKitapOkuyucu
+; Yönetici yetkisi ile Program Files kurulumu
+PrivilegesRequired=admin
+DefaultDirName={autopf}\Omer_Goktas_Net\Erisilebilir Kitap Okuyucu
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 
@@ -60,7 +60,7 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDi
 
 [Run]
 ; Kurulum bittiğinde isteğe bağlı veya doğrudan başlatma
-Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppName} uygulamasını başlat"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "{#MyAppName} uygulamasını başlat"; Flags: nowait postinstall
 
 [Code]
 // Kurulum başlamadan önce varsa eski açık uygulamayı güvenle kapat

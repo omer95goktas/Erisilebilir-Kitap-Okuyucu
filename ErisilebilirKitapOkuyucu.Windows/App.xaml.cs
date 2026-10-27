@@ -48,6 +48,15 @@ public partial class App : Application
 
         StartupFile = e.Args.FirstOrDefault(a => File.Exists(a));
 
+        if (Array.IndexOf(e.Args, "--selftest") < 0 && Array.IndexOf(e.Args, "--snapshots") < 0)
+        {
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(2500);
+                await UpdateService.CheckForUpdatesAsync(isManual: false);
+            });
+        }
+
         var st = Array.IndexOf(e.Args, "--selftest");
         if (st >= 0 && st + 1 < e.Args.Length)
         {
