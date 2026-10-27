@@ -39,6 +39,11 @@ public partial class MainWindow : Window
         InitializeComponent();
         try
         {
+            VersionBadgeText.Text = "v" + Services.UpdateService.CurrentVersion;
+        }
+        catch { }
+        try
+        {
             var logoPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "app_logo.png");
             if (File.Exists(logoPath))
             {
