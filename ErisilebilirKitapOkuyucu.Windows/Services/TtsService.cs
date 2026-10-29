@@ -134,39 +134,9 @@ public sealed class TtsService : IDisposable
                 }
             }
 
-            // 3. Çok uzun paragrafları (1200+ karakter) TTS motorlarının takılmaması için cümle sınırlarından böl
             foreach (var item in rawList)
             {
-                if (item.text.Length <= 1200)
-                {
-                    result.Add(new Sentence(item.text, item.start, item.length));
-                }
-                else
-                {
-                    var subSentences = Regex.Split(item.text, @"(?<=[.!?…])\s+");
-                    var chunk = new StringBuilder();
-                    int chunkStart = item.start;
-                    int offset = 0;
-
-                    foreach (var s in subSentences)
-                    {
-                        if (chunk.Length + s.Length > 900 && chunk.Length > 0)
-                        {
-                            var cText = chunk.ToString().Trim();
-                            result.Add(new Sentence(cText, chunkStart, cText.Length));
-                            chunk.Clear();
-                            chunkStart = item.start + offset;
-                        }
-                        if (chunk.Length > 0) chunk.Append(' ');
-                        chunk.Append(s);
-                        offset += s.Length + 1;
-                    }
-                    if (chunk.Length > 0)
-                    {
-                        var cText = chunk.ToString().Trim();
-                        result.Add(new Sentence(cText, chunkStart, cText.Length));
-                    }
-                }
+                result.Add(new Sentence(item.text, item.start, item.length));
             }
 
             return result.Count > 0 ? result : new List<Sentence> { new(text.Trim(), 0, text.Trim().Length) };

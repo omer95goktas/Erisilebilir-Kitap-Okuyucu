@@ -54,7 +54,7 @@ public sealed class DocumentSession : IDisposable
                 break;
             case BookType.EPUB: _pages = Paginate(Safe(() => TextExtractor.Epub(_path), "EPUB kitabı okunurken bir hata oluştu")); break;
             case BookType.DOCX: _pages = Paginate(Safe(() => TextExtractor.Docx(_path), "Word belgesi (DOCX) okunurken bir hata oluştu")); break;
-            default: _pages = Paginate(TextExtractor.ReadTextFile(_path)); break;
+            default: _pages = Paginate(TextExtractor.ReflowPdfText(TextExtractor.ReadTextFile(_path))); break;
         }
         if (_pages != null) TotalPages = Math.Max(1, _pages.Count);
     }
@@ -73,7 +73,7 @@ public sealed class DocumentSession : IDisposable
 
         var text = await Task.Run(() =>
         {
-            try { return TextExtractor.Clean(PdfPageText(page)); }
+            try { return TextExtractor.ReflowPdfText(PdfPageText(page)); }
             catch (Exception e) { AppPaths.Log("pdf page: " + e); return ""; }
         });
 
@@ -82,7 +82,7 @@ public sealed class DocumentSession : IDisposable
             // Taranmış sayfa: Windows OCR
             string ocr = "";
             try { ocr = await OcrPdfPageAsync(page); } catch (Exception e) { AppPaths.Log("ocr: " + e); }
-            if (!string.IsNullOrWhiteSpace(ocr)) text = ocr;
+            if (!string.IsNullOrWhiteSpace(ocr)) text = TextExtractor.ReflowPdfText(ocr);
         }
         if (string.IsNullOrWhiteSpace(text)) text = "Bu sayfada okunabilir metin veya yazı bulunamadı.";
         if (_pdfCache.Count > 12) _pdfCache.Clear();
@@ -134,7 +134,7 @@ public sealed class DocumentSession : IDisposable
             {
                 if (ct.IsCancellationRequested) break;
                 string text;
-                try { text = _pages != null ? _pages[p - 1] : PdfPageText(p); } catch { continue; }
+                try { text = _pages != null ? _pages[p - 1] : TextExtractor.ReflowPdfText(PdfPageText(p)); } catch { continue; }
                 var lines = text.Replace("\r", "").Split('\n');
                 for (int i = 0; i < lines.Length && results.Count < maxResults; i++)
                 {
@@ -183,6 +183,123 @@ public static class TextExtractor
 {
     public static string Clean(string text) =>
         Regex.Replace(Regex.Replace(Regex.Replace(text.Replace("\r\n", "\n").Replace('\r', '\n'), "[ \\t]+", " "), " ?\\n ?", "\n"), "\\n{3,}", "\n\n").Trim();
+
+    /// <summary>
+    /// PDF ve OCR gibi görsel satır sonu içeren metinleri doğal paragraflara dönüştürür.
+    /// Satır içi kesmeleri birleştirir, kelime sonu tirelerini (- ) bağlar,
+    /// gerçek paragraf bitişlerine çift satır sonu (\r\n\r\n) ekler.
+    /// </summary>
+    public static string ReflowPdfText(string rawText)
+    {
+        if (string.IsNullOrWhiteSpace(rawText)) return "";
+
+        var rawLines = rawText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
+        var filtered = new List<string>();
+
+        foreach (var l in rawLines)
+        {
+            var trimmed = l.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed))
+            {
+                filtered.Add("");
+                continue;
+            }
+
+            // Sayfa üst/alt bilgi ve ardışık nokta içeren satır numaralarını (koşu başlıkları) temizle
+            if (Regex.IsMatch(trimmed, @"\.{4,}") && (Regex.IsMatch(trimmed, @"\d+") || Regex.IsMatch(trimmed, @"(?i)tezg[aâ]h|bask[ıi]|sayfa")))
+                continue;
+            if (Regex.IsMatch(trimmed, @"^[-—]?\s*\d+\s*[-—]?$"))
+                continue;
+
+            filtered.Add(l.TrimEnd());
+        }
+
+        var lines = new List<string>();
+        for (int i = 0; i < filtered.Count; i++)
+        {
+            var line = filtered[i];
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                lines.Add("");
+                continue;
+            }
+
+            var trimmed = line.Trim();
+            // Satır sonundaki kelime bölme tirelerini güvenle birleştir
+            var m = Regex.Match(trimmed, @"(\p{L}+)-\s*$");
+            if (m.Success && i + 1 < filtered.Count && !string.IsNullOrWhiteSpace(filtered[i + 1]))
+            {
+                var nextLine = filtered[i + 1].TrimStart();
+                var nextWord = Regex.Match(nextLine, @"^(\p{L}+)([\s\S]*)$");
+                if (nextWord.Success)
+                {
+                    var combinedWord = m.Groups[1].Value + nextWord.Groups[1].Value;
+                    var lineRest = trimmed.Substring(0, m.Index) + combinedWord;
+                    lines.Add(lineRest);
+                    filtered[i + 1] = nextWord.Groups[2].Value.TrimStart();
+                    continue;
+                }
+            }
+            lines.Add(line);
+        }
+
+        var nonEmpty = lines.Where(l => l.Trim().Length > 0).ToList();
+        if (nonEmpty.Count == 0) return "";
+
+        var sortedLens = nonEmpty.Select(l => l.Length).OrderBy(l => l).ToList();
+        double typicalMaxLen = sortedLens[(int)(sortedLens.Count * 0.85)];
+        double shortThreshold = Math.Max(30, typicalMaxLen * 0.82);
+
+        var paragraphs = new List<string>();
+        var currentPara = new StringBuilder();
+
+        for (int i = 0; i < lines.Count; i++)
+        {
+            var line = lines[i];
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                if (currentPara.Length > 0)
+                {
+                    paragraphs.Add(currentPara.ToString().Trim());
+                    currentPara.Clear();
+                }
+                continue;
+            }
+
+            var trimmed = line.Trim();
+            bool hasIndent = line.StartsWith("   ") || line.StartsWith("\t");
+
+            if (hasIndent && currentPara.Length > 0)
+            {
+                paragraphs.Add(currentPara.ToString().Trim());
+                currentPara.Clear();
+            }
+
+            if (currentPara.Length > 0) currentPara.Append(' ');
+            currentPara.Append(trimmed);
+
+            bool endsWithPunct = Regex.IsMatch(trimmed, @"[.!?…:;][""'»”]?$");
+            bool isShortLine = line.Length < shortThreshold;
+            bool nextIsIndented = (i + 1 < lines.Count) &&
+                                  (lines[i + 1].StartsWith("   ") || lines[i + 1].StartsWith("\t"));
+            bool nextIsDialogueOrBullet = (i + 1 < lines.Count) &&
+                                  Regex.IsMatch(lines[i + 1].TrimStart(), @"^(?:[—–\-•*]|\d+[\.\)]|[a-zA-Z][\.\)])\s+");
+
+            if ((endsWithPunct && (isShortLine || nextIsIndented || nextIsDialogueOrBullet)) ||
+                (i + 1 < lines.Count && string.IsNullOrWhiteSpace(lines[i + 1])))
+            {
+                paragraphs.Add(currentPara.ToString().Trim());
+                currentPara.Clear();
+            }
+        }
+
+        if (currentPara.Length > 0)
+        {
+            paragraphs.Add(currentPara.ToString().Trim());
+        }
+
+        return string.Join("\r\n\r\n", paragraphs.Where(p => !string.IsNullOrWhiteSpace(p)));
+    }
 
     public static int PdfPageCount(string path)
     {

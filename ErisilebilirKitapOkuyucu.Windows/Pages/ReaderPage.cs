@@ -363,34 +363,56 @@ public sealed class ReaderPage : PageBase
             : "Bu satırdan itibaren sesli okuma başlatıldı");
     }
 
-    private void GoNextParagraph()
+    private List<int> GetParagraphStartIndices()
+    {
+        var starts = new List<int> { 0 };
+        string text = _text.Text;
+        if (string.IsNullOrEmpty(text)) return starts;
+
+        var matches = Regex.Matches(text, @"\r?\n\s*\r?\n");
+        foreach (Match m in matches)
+        {
+            int idx = m.Index + m.Length;
+            while (idx < text.Length && (text[idx] == '\r' || text[idx] == '\n' || text[idx] == ' '))
+                idx++;
+            if (idx < text.Length && !starts.Contains(idx))
+                starts.Add(idx);
+        }
+        return starts;
+    }
+
+    private async void GoNextParagraph()
     {
         if (string.IsNullOrEmpty(_text.Text)) return;
         int caret = _text.CaretIndex;
-        string text = _text.Text;
+        var starts = GetParagraphStartIndices();
 
-        // Bulunulan konumdan sonraki paragraf ayrımını (\r\n\r\n veya \n\n) bul
-        var m = Regex.Match(text.Substring(caret), @"\r?\n\s*\r?\n");
-        if (m.Success)
+        int nextStart = -1;
+        foreach (var s in starts)
         {
-            int target = caret + m.Index + m.Length;
-            while (target < text.Length && (text[target] == '\r' || text[target] == '\n' || text[target] == ' '))
-                target++;
-
-            if (target < text.Length)
+            if (s > caret)
             {
-                FocusTextAt(target);
-                var (para, _, _) = GetCurrentParagraph();
-                if (!string.IsNullOrWhiteSpace(para))
-                    App.Announce(para.Length > 120 ? para[..120] + "…" : para);
-                return;
+                nextStart = s;
+                break;
             }
         }
 
+        if (nextStart != -1)
+        {
+            FocusTextAt(nextStart);
+            var (para, _, _) = GetCurrentParagraph();
+            if (!string.IsNullOrWhiteSpace(para))
+                App.Announce(para);
+            return;
+        }
+
+        // Sayfa sonundayız: bir sonraki sayfaya geç ve 1. paragraftan devam et
         if (_doc != null && _page < _doc.TotalPages)
         {
-            Step(1);
-            App.Announce("Sonraki sayfaya geçildi");
+            await ShowPage(_page + 1, autoPlay: false, announce: false);
+            FocusTextAt(0);
+            var (firstPara, _, _) = GetCurrentParagraph();
+            App.Announce($"Sayfa {_page} / {_doc.TotalPages}. {firstPara}".Trim());
         }
         else
         {
@@ -398,46 +420,49 @@ public sealed class ReaderPage : PageBase
         }
     }
 
-    private void GoPreviousParagraph()
+    private async void GoPreviousParagraph()
     {
         if (string.IsNullOrEmpty(_text.Text)) return;
         int caret = _text.CaretIndex;
-        string text = _text.Text;
+        var starts = GetParagraphStartIndices();
 
-        if (caret <= 0)
+        int currentStart = 0;
+        int prevStart = -1;
+        for (int i = 0; i < starts.Count; i++)
         {
-            if (_doc != null && _page > 1)
+            if (starts[i] <= caret)
             {
-                Step(-1);
-                App.Announce("Önceki sayfaya geçildi");
+                currentStart = starts[i];
+                prevStart = i > 0 ? starts[i - 1] : -1;
             }
-            else
-            {
-                App.Announce("İlk sayfadasınız");
-            }
-            return;
+            else break;
         }
 
-        // Bulunulan konumdan önceki paragraf ayrımını bul
-        int searchLen = Math.Max(0, caret - 2);
-        var matches = Regex.Matches(text.Substring(0, searchLen), @"\r?\n\s*\r?\n", RegexOptions.RightToLeft);
-        if (matches.Count > 0)
-        {
-            int target = matches[0].Index + matches[0].Length;
-            while (target < text.Length && (text[target] == '\r' || text[target] == '\n' || text[target] == ' '))
-                target++;
+        int target = (caret > currentStart + 1) ? currentStart : prevStart;
 
+        if (target != -1)
+        {
             FocusTextAt(target);
             var (para, _, _) = GetCurrentParagraph();
             if (!string.IsNullOrWhiteSpace(para))
-                App.Announce(para.Length > 120 ? para[..120] + "…" : para);
+                App.Announce(para);
             return;
         }
 
-        FocusTextAt(0);
-        var (firstPara, _, _) = GetCurrentParagraph();
-        if (!string.IsNullOrWhiteSpace(firstPara))
-            App.Announce(firstPara.Length > 120 ? firstPara[..120] + "…" : firstPara);
+        // Sayfanın en başındayız: bir önceki sayfaya geç ve o sayfanın son paragrafına odaklan
+        if (_doc != null && _page > 1)
+        {
+            await ShowPage(_page - 1, autoPlay: false, announce: false);
+            var prevPageStarts = GetParagraphStartIndices();
+            int lastStart = prevPageStarts.Count > 0 ? prevPageStarts[^1] : 0;
+            FocusTextAt(lastStart);
+            var (lastPara, _, _) = GetCurrentParagraph();
+            App.Announce($"Sayfa {_page} / {_doc.TotalPages}. {lastPara}".Trim());
+        }
+        else
+        {
+            App.Announce("İlk sayfadasınız");
+        }
     }
 
     private void ToggleReadMode()

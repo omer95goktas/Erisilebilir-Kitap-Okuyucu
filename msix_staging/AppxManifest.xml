@@ -7,7 +7,7 @@
   <Identity
     Name="mergkta.EriilebilirKitapOkuyucu"
     Publisher="CN=E9BA95A5-71F4-4432-A7AD-8645EF69BD4A"
-    Version="1.0.8.0"
+    Version="1.0.9.0"
     ProcessorArchitecture="x64" />
 
   <Properties>

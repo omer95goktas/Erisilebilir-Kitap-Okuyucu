@@ -119,6 +119,18 @@ public static class SelfTest
             Check("PDF sayfa sayısı ve metin", s.TotalPages == 3 && t2.Contains("Page 2") && t2.Contains("river bank number 2"), $"{s.TotalPages} sayfa; '{t2}'");
         }
 
+        // PDF paragraf reflow ve tire birleştirme testi
+        string rawWrap = "Bu bir deneme kitabının ilk paragrafıdır ve satırlar görsel olarak\r\n" +
+                         "burada kesilmiştir. Bu cümle ile ilk paragraf biter.\r\n" +
+                         "İkinci paragraf ise arka-\r\n" +
+                         "daşlar kelimesini içermektedir ve devam eder.";
+        string reflowed = TextExtractor.ReflowPdfText(rawWrap);
+        var reflowParas = reflowed.Split(new[] { "\r\n\r\n" }, StringSplitOptions.RemoveEmptyEntries);
+        bool reflowOk = reflowParas.Length == 2 &&
+                        reflowParas[0].Contains("görsel olarak burada kesilmiştir.") &&
+                        reflowParas[1].Contains("arkadaşlar kelimesini");
+        Check("PDF Paragraf Algılama ve Satır Reflow", reflowOk, $"{reflowParas.Length} paragraf tespit edildi");
+
         // Gerçek PDF'ler (varsa)
         if (extraPdfDir != null && Directory.Exists(extraPdfDir))
         {
