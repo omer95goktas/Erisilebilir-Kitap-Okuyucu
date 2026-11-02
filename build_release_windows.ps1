@@ -45,6 +45,19 @@ if ($configContent -notmatch "includedFrameworks") {
 }
 Write-Host ">>> [Doğrulama Başarılı] .NET çalışma zamanı pakete başarıyla gömüldü (includedFrameworks onaylandı)." -ForegroundColor Green
 
+# Çevrim dışı ses modellerini kopyala
+$sourceModels = "C:\Users\gokta\.gemini\antigravity\scratch\models"
+$destModels = Join-Path $publishFolder "models"
+if (Test-Path $sourceModels) {
+    if (-not (Test-Path $destModels)) { New-Item -ItemType Directory -Path $destModels -Force | Out-Null }
+    if (Test-Path (Join-Path $sourceModels "vits-piper-tr_TR-fahrettin-medium")) {
+        Copy-Item (Join-Path $sourceModels "vits-piper-tr_TR-fahrettin-medium") $destModels -Recurse -Force
+    }
+    if (Test-Path (Join-Path $sourceModels "vits-mms-azj-script_latin")) {
+        Copy-Item (Join-Path $sourceModels "vits-mms-azj-script_latin") $destModels -Recurse -Force
+    }
+}
+
 # 4. MSIX Staging Güncelleme
 Write-Host ">>> [2/4] MSIX hazırlık klasörü (msix_staging) güncelleniyor..." -ForegroundColor Green
 robocopy $publishFolder $msixStaging /E /XF AppxManifest.xml | Out-Null

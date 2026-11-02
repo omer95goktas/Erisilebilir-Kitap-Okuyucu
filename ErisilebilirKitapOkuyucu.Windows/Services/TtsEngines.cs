@@ -4,6 +4,7 @@ using SapiSynth = System.Speech.Synthesis.SpeechSynthesizer;
 using OcSynth = Windows.Media.SpeechSynthesis.SpeechSynthesizer;
 using Windows.Media.Core;
 using Windows.Media.Playback;
+using NAudio.Wave;
 
 namespace ErisilebilirKitapOkuyucu.Services;
 
@@ -19,7 +20,8 @@ public interface ITtsEngine : IDisposable
     string Id { get; }
     string DisplayName { get; }
     IReadOnlyList<VoiceDescriptor> GetVoices();
-    Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct);
+    Task SpeakAsync(string text, string? voiceId, float rate, float pitch, float volume, CancellationToken ct);
+    Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct) => SpeakAsync(text, voiceId, rate, pitch, 1.0f, ct);
     Task SynthesizeToWavAsync(string text, string? voiceId, float rate, float pitch, string path, CancellationToken ct);
     Task PreFetchAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct) => Task.CompletedTask;
 }
@@ -70,34 +72,94 @@ public sealed class SapiEngine : ITtsEngine
         return $"<speak version=\"1.0\" xmlns=\"http://www.w3.org/2001/10/synthesis\" xml:lang=\"{lang}\"><prosody pitch=\"{p}\">{SecurityElement.Escape(text)}</prosody></speak>";
     }
 
-    public Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct)
+    public Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct) => SpeakAsync(text, voiceId, rate, pitch, 1.0f, ct);
+
+    public async Task SpeakAsync(string text, string? voiceId, float rate, float pitch, float volume, CancellationToken ct)
     {
         var tcs = new TaskCompletionSource();
-        var synth = new SapiSynth { Volume = 100, Rate = MapRate(rate) };
-        _synth = synth;
-        SelectVoice(synth, voiceId);
-        var lang = synth.Voice?.Culture?.Name ?? "tr-TR";
-        CancellationTokenRegistration reg = default;
-        synth.SpeakCompleted += (_, e) =>
+        int vol = Math.Clamp((int)Math.Round(volume * 100), 0, 100);
+
+        if (Math.Abs(pitch - 1.0f) <= 0.02f)
         {
-            reg.Dispose();
-            try { synth.Dispose(); } catch { }
-            if (e.Cancelled) tcs.TrySetCanceled();
-            else if (e.Error != null) tcs.TrySetException(e.Error);
-            else tcs.TrySetResult();
-        };
-        reg = ct.Register(() => { try { synth.SpeakAsyncCancelAll(); } catch { } });
-        try
-        {
-            if (Math.Abs(pitch - 1f) > 0.01f)
+            var synth = new SapiSynth { Volume = vol, Rate = MapRate(rate) };
+            _synth = synth;
+            SelectVoice(synth, voiceId);
+            CancellationTokenRegistration reg = default;
+            synth.SpeakCompleted += (_, e) =>
             {
-                try { synth.SpeakSsmlAsync(Ssml(text, pitch, lang)); }
-                catch { synth.SpeakAsync(text); }
-            }
-            else synth.SpeakAsync(text);
+                reg.Dispose();
+                try { synth.Dispose(); } catch { }
+                if (e.Cancelled) tcs.TrySetCanceled();
+                else if (e.Error != null) tcs.TrySetException(e.Error);
+                else tcs.TrySetResult();
+            };
+            reg = ct.Register(() => { try { synth.SpeakAsyncCancelAll(); } catch { } });
+            try { synth.SpeakAsync(text); }
+            catch (Exception e) { reg.Dispose(); tcs.TrySetException(e); }
+            await tcs.Task;
+            return;
         }
-        catch (Exception e) { reg.Dispose(); tcs.TrySetException(e); }
-        return tcs.Task;
+
+        // SAPI motorlarının çoğu (örn. Microsoft Zira Desktop) SSML perde etiketini desteklemediğinden
+        // perde 1.0'dan farklı olduğunda sesi DSP SmbPitchShifter ile kesin olarak kaydırıyoruz.
+        byte[]? outBytes = null;
+        await Task.Run(() =>
+        {
+            using var synth = new SapiSynth { Volume = 100, Rate = MapRate(rate) };
+            SelectVoice(synth, voiceId);
+
+            using var mem = new MemoryStream();
+            synth.SetOutputToWaveStream(mem);
+            ct.ThrowIfCancellationRequested();
+            synth.Speak(text);
+            synth.SetOutputToNull();
+
+            byte[] pcmBytes = mem.ToArray();
+            if (pcmBytes.Length <= 44) return;
+            int sampleRate = BitConverter.ToInt32(pcmBytes, 24);
+            int channels = BitConverter.ToInt16(pcmBytes, 22);
+            int bits = BitConverter.ToInt16(pcmBytes, 34);
+
+            int bytesPerSample = Math.Max(1, bits / 8);
+            int sampleCount = (pcmBytes.Length - 44) / bytesPerSample;
+            var floatSamples = new float[sampleCount];
+            for (int i = 0; i < sampleCount; i++)
+            {
+                short sample = BitConverter.ToInt16(pcmBytes, 44 + i * 2);
+                floatSamples[i] = sample / 32768f;
+            }
+
+            float pitchFactor = Math.Clamp(pitch, 0.5f, 2.0f);
+            var shifter = new NAudio.Dsp.SmbPitchShifter();
+            shifter.PitchShift(pitchFactor, sampleCount, 1024, 4, sampleRate, floatSamples);
+
+            using var outMem = new MemoryStream();
+            using (var writer = new WaveFileWriter(outMem, WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, channels)))
+            {
+                writer.WriteSamples(floatSamples, 0, sampleCount);
+            }
+            outBytes = outMem.ToArray();
+        }, ct);
+
+        if (outBytes == null || outBytes.Length == 0) return;
+        ct.ThrowIfCancellationRequested();
+
+        var playTcs = new TaskCompletionSource();
+        using var playStream = new MemoryStream(outBytes);
+        using var reader = new WaveFileReader(playStream);
+        using var waveOut = new WaveOutEvent();
+        waveOut.Volume = Math.Clamp(volume, 0.0f, 1.0f);
+        waveOut.Init(reader);
+
+        waveOut.PlaybackStopped += (_, _) => playTcs.TrySetResult();
+        using var cancelReg = ct.Register(() =>
+        {
+            try { waveOut.Stop(); } catch { }
+            playTcs.TrySetCanceled(ct);
+        });
+
+        waveOut.Play();
+        await playTcs.Task;
     }
 
     public Task SynthesizeToWavAsync(string text, string? voiceId, float rate, float pitch, string path, CancellationToken ct) =>
@@ -105,14 +167,43 @@ public sealed class SapiEngine : ITtsEngine
         {
             using var s = new SapiSynth { Rate = MapRate(rate), Volume = 100 };
             SelectVoice(s, voiceId);
-            s.SetOutputToWaveFile(path);
-            ct.ThrowIfCancellationRequested();
-            if (Math.Abs(pitch - 1f) > 0.01f)
+
+            if (Math.Abs(pitch - 1.0f) <= 0.02f)
             {
-                try { s.SpeakSsml(Ssml(text, pitch, s.Voice?.Culture?.Name ?? "tr-TR")); return; }
-                catch { /* düz metne düş */ }
+                s.SetOutputToWaveFile(path);
+                ct.ThrowIfCancellationRequested();
+                s.Speak(text);
+                s.SetOutputToNull();
+                return;
             }
+
+            using var mem = new MemoryStream();
+            s.SetOutputToWaveStream(mem);
+            ct.ThrowIfCancellationRequested();
             s.Speak(text);
+            s.SetOutputToNull();
+
+            byte[] pcmBytes = mem.ToArray();
+            if (pcmBytes.Length <= 44) return;
+            int sampleRate = BitConverter.ToInt32(pcmBytes, 24);
+            int channels = BitConverter.ToInt16(pcmBytes, 22);
+            int bits = BitConverter.ToInt16(pcmBytes, 34);
+
+            int bytesPerSample = Math.Max(1, bits / 8);
+            int sampleCount = (pcmBytes.Length - 44) / bytesPerSample;
+            var floatSamples = new float[sampleCount];
+            for (int i = 0; i < sampleCount; i++)
+            {
+                short sample = BitConverter.ToInt16(pcmBytes, 44 + i * 2);
+                floatSamples[i] = sample / 32768f;
+            }
+
+            float pitchFactor = Math.Clamp(pitch, 0.5f, 2.0f);
+            var shifter = new NAudio.Dsp.SmbPitchShifter();
+            shifter.PitchShift(pitchFactor, sampleCount, 1024, 4, sampleRate, floatSamples);
+
+            using var writer = new WaveFileWriter(path, WaveFormat.CreateIeeeFloatWaveFormat(sampleRate, channels));
+            writer.WriteSamples(floatSamples, 0, sampleCount);
         }, ct);
 
     public void Dispose() { try { _synth?.SpeakAsyncCancelAll(); _synth?.Dispose(); } catch { } }
@@ -134,7 +225,7 @@ public sealed class OneCoreEngine : ITtsEngine
         catch (Exception e) { AppPaths.Log("onecore voices: " + e); return Array.Empty<VoiceDescriptor>(); }
     }
 
-    private static OcSynth Create(string? voiceId, float rate, float pitch)
+    private static OcSynth Create(string? voiceId, float rate, float pitch, float volume = 1.0f)
     {
         var s = new OcSynth();
         if (!string.IsNullOrEmpty(voiceId))
@@ -146,19 +237,21 @@ public sealed class OneCoreEngine : ITtsEngine
         {
             s.Options.SpeakingRate = Math.Clamp(rate, 0.5f, 6.0f);
             s.Options.AudioPitch = Math.Clamp(pitch, 0f, 2f);
-            s.Options.AudioVolume = 1.0;
+            s.Options.AudioVolume = Math.Clamp(volume, 0.0, 1.0);
         }
         catch { }
         return s;
     }
 
-    public async Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct)
+    public Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct) => SpeakAsync(text, voiceId, rate, pitch, 1.0f, ct);
+
+    public async Task SpeakAsync(string text, string? voiceId, float rate, float pitch, float volume, CancellationToken ct)
     {
-        using var synth = Create(voiceId, rate, pitch);
+        using var synth = Create(voiceId, rate, pitch, volume);
         using var stream = await synth.SynthesizeTextToStreamAsync(text);
         ct.ThrowIfCancellationRequested();
         var tcs = new TaskCompletionSource();
-        using var player = new MediaPlayer { AutoPlay = false };
+        using var player = new MediaPlayer { AutoPlay = false, Volume = Math.Clamp(volume, 0.0, 1.0) };
         player.CommandManager.IsEnabled = false; // medya tuşları sesli kitap oynatıcısına ait kalsın
         player.MediaEnded += (_, _) => tcs.TrySetResult();
         player.MediaFailed += (_, e) => tcs.TrySetException(new InvalidOperationException("OneCore oynatma hatası: " + e.ErrorMessage));

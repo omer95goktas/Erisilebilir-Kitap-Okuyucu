@@ -5,6 +5,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Threading;
 using ErisilebilirKitapOkuyucu.Pages;
+using ErisilebilirKitapOkuyucu.Services;
 
 namespace ErisilebilirKitapOkuyucu;
 
@@ -70,6 +71,7 @@ public partial class MainWindow : Window
             EnsureForeground();
         };
         Closing += (_, _) => { _current?.OnHidden(); };
+        Closed += (_, _) => { Application.Current.Shutdown(); };
     }
 
     public void EnsureForeground()
@@ -124,7 +126,7 @@ public partial class MainWindow : Window
     }
 
     public void ShowLibrary() => Navigate(new LibraryPage());
-    public void ShowSettings() => Navigate(new SettingsPage());
+    public void ShowSettings(string initialCategory = "cat_reading") => Navigate(new SettingsPage(initialCategory));
 
     public void OpenBook(BookItem book)
     {
@@ -144,8 +146,17 @@ public partial class MainWindow : Window
 
     private void OnKey(object sender, KeyEventArgs e)
     {
-        if (e.Key == Key.F1) { e.Handled = true; new HelpDialog(this).ShowDialog(); return; }
-        if (e.Key == Key.Escape && !e.Handled && _current != null)
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key == Key.F4 && (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt) || e.Key == Key.System))
+        {
+            e.Handled = true;
+            Close();
+            return;
+        }
+
+        if (ShortcutService.Matches("General.Help", e)) { e.Handled = true; new HelpDialog(this).ShowDialog(); return; }
+        if (ShortcutService.Matches("General.Settings", e)) { e.Handled = true; ShowSettings(); return; }
+        if (ShortcutService.Matches("General.Back", e) && !e.Handled && _current != null)
         {
             if (_current.HandleBack()) e.Handled = true;
         }

@@ -20,6 +20,27 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        if (e.Args.Length >= 4 && e.Args[0] == "--mms-synth")
+        {
+            var inputFile = e.Args[1];
+            var outputFile = e.Args[2];
+            var speed = float.TryParse(e.Args[3], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var sp) ? sp : 1.0f;
+            var pitch = e.Args.Length >= 5 && float.TryParse(e.Args[4], System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var pt) ? pt : 1.0f;
+
+            try
+            {
+                Services.SherpaTtsEngine.SynthesizeMmsDirect(inputFile, outputFile, speed, pitch);
+                Shutdown(0);
+            }
+            catch (Exception ex)
+            {
+                AppPaths.Log("mms synth error: " + ex);
+                Shutdown(1);
+            }
+            return;
+        }
+
         // Bazı ekran kartı sürücülerinde (örn. AMD) çıkışta çökme olabildiği için yazılım işleme kullanılır; metin tabanlı arayüz için fark edilmez.
         System.Windows.Media.RenderOptions.ProcessRenderMode = System.Windows.Interop.RenderMode.SoftwareOnly;
         Encoding.RegisterProvider(CodePagesEncodingProvider.Instance); // windows-1254 (Türkçe) için gerekli

@@ -12,20 +12,51 @@ public sealed class TtsService : IDisposable
 {
     private readonly BookRepository _repo;
     private readonly IReadOnlyList<ITtsEngine> _engines = TtsEngines.CreateAll();
+    private readonly System.Windows.Threading.DispatcherTimer _sleep = new() { Interval = TimeSpan.FromSeconds(1) };
+    private long _sleepEndTicks;
     private List<Sentence> _sentences = new();
     private CancellationTokenSource? _cts;
     private int _generation;
 
     public bool IsSpeaking { get; private set; }
     public int CurrentIndex { get; private set; }
+    public int SleepSecondsLeft { get; private set; }
     public IReadOnlyList<Sentence> Sentences => _sentences;
 
     public event Action? SpeakingChanged;
     public event Action<int>? SentenceChanged;
     public event Action? PageCompleted;
     public event Action<string>? Error;
+    public event Action? SleepTimerFired;
+    public event Action? SleepTimerTick;
 
-    public TtsService(BookRepository repo) { _repo = repo; }
+    public TtsService(BookRepository repo)
+    {
+        _repo = repo;
+        _sleep.Tick += (_, _) => SleepTick();
+    }
+
+    public void StartSleepTimer(int minutes)
+    {
+        _sleep.Stop();
+        if (minutes <= 0) { SleepSecondsLeft = 0; SleepTimerTick?.Invoke(); return; }
+        SleepSecondsLeft = minutes * 60;
+        _sleepEndTicks = Environment.TickCount64 + SleepSecondsLeft * 1000L;
+        _sleep.Start();
+        SleepTimerTick?.Invoke();
+    }
+
+    private void SleepTick()
+    {
+        SleepSecondsLeft = (int)Math.Max(0, (_sleepEndTicks - Environment.TickCount64) / 1000);
+        if (SleepSecondsLeft <= 0)
+        {
+            _sleep.Stop();
+            Stop();
+            SleepTimerFired?.Invoke();
+        }
+        SleepTimerTick?.Invoke();
+    }
 
     public IReadOnlyList<ITtsEngine> Engines => _engines;
 
@@ -144,13 +175,16 @@ public sealed class TtsService : IDisposable
 
         // Cümle Cümle Okuma Modu
         int posSentence = 0;
-        foreach (Match para in Regex.Matches(text, @"[^\r\n]+(?:\r?\n(?!\r?\n)[^\r\n]*)*"))
+        var paraBlocks = Regex.Split(text, @"(?:\r?\n\s*\r?\n)+");
+        foreach (var para in paraBlocks)
         {
-            foreach (var part in Regex.Split(para.Value, @"(?<=[.!?…])\s+"))
+            if (string.IsNullOrWhiteSpace(para)) continue;
+            foreach (var part in Regex.Split(para, @"(?<=[.!?…])\s+"))
             {
                 var clean = part.Trim();
                 if (clean.Length == 0) continue;
                 var idx = text.IndexOf(clean, posSentence, StringComparison.Ordinal);
+                if (idx < 0) idx = text.IndexOf(clean, StringComparison.Ordinal);
                 if (idx < 0) idx = posSentence;
                 result.Add(new Sentence(clean, idx, clean.Length));
                 posSentence = idx + clean.Length;
@@ -205,16 +239,25 @@ public sealed class TtsService : IDisposable
             CurrentIndex = i;
             SentenceChanged?.Invoke(i);
 
+            var textToSpeak = SanitizeForSpeech(_sentences[i].Text);
+            if (string.IsNullOrWhiteSpace(textToSpeak))
+            {
+                // Yalnızca sembolden oluşan veya boş satırlarda kısa bir bekleme yapıp devam et
+                try { await Task.Delay(200, cts.Token); } catch (OperationCanceledException) { return; }
+                continue;
+            }
+
             // Sonraki cümleyi arka planda önceden getir (çevrim içi seslerde cümleler arası sıfır gecikme)
             if (i + 1 < _sentences.Count)
             {
-                var nextText = _sentences[i + 1].Text;
-                _ = engine.PreFetchAsync(nextText, voice, s.TtsSpeechRate, s.TtsPitch, cts.Token);
+                var nextText = SanitizeForSpeech(_sentences[i + 1].Text);
+                if (!string.IsNullOrWhiteSpace(nextText))
+                    _ = engine.PreFetchAsync(nextText, voice, s.TtsSpeechRate, s.TtsPitch, cts.Token);
             }
 
             try
             {
-                await engine.SpeakAsync(_sentences[i].Text, voice, s.TtsSpeechRate, s.TtsPitch, cts.Token);
+                await engine.SpeakAsync(textToSpeak, voice, s.TtsSpeechRate, s.TtsPitch, s.TtsVolume, cts.Token);
                 failures = 0;
             }
             catch (OperationCanceledException) { return; }
@@ -260,8 +303,100 @@ public sealed class TtsService : IDisposable
     {
         Stop();
         var s = _repo.Settings;
-        try { await engine.SpeakAsync(text, voiceId, s.TtsSpeechRate, s.TtsPitch, CancellationToken.None); }
+        var textToSpeak = SanitizeForSpeech(text);
+        if (string.IsNullOrWhiteSpace(textToSpeak)) textToSpeak = text;
+        try { await engine.SpeakAsync(textToSpeak, voiceId, s.TtsSpeechRate, s.TtsPitch, s.TtsVolume, CancellationToken.None); }
         catch (Exception e) { Error?.Invoke("Ses denenemedi: " + e.Message); }
+    }
+
+    /// <summary>
+    /// TTS motorlarının sembolleri (yıldız, alt çizgi, tırnak, parantez, kare vb.) kelime olarak
+    /// ("yıldız", "parantez aç" vb.) okumasını engeller; nokta ve virgüle göre doğal duraklama sağlar.
+    /// </summary>
+    public static string SanitizeForSpeech(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "";
+
+        // 1. Markdown başlık imleri (# ## ###) temizle
+        text = Regex.Replace(text, @"^[\s#]+", "");
+
+        // 2. Madde imleri ve özel liste sembollerini temizle
+        text = Regex.Replace(text, @"[•·◦▪▫►■◆◇★☆✓✔✕✖\u2022\u2023\u25E6\u2043\u2219]", " ");
+
+        // 3. Yıldız (*), alt çizgi (_), diyez (#), tilda (~), şapka (^), dikey çizgi (|), ters bölü (\) temizle
+        text = text.Replace("*", " ")
+                   .Replace("#", " ")
+                   .Replace("_", " ")
+                   .Replace("~", " ")
+                   .Replace("^", " ")
+                   .Replace("|", ", ")
+                   .Replace("\\", " ");
+
+        // 4. Kesme işareti ile ayrılmış ekleri birleştir (örn: Türkiye'de -> Türkiyede, Ahmet'in -> Ahmetin, 1923'te -> 1923te)
+        // Böylece TTS eki ayrı bir kelime gibi koparmadan veya yutmadan akıcı telaffuz eder
+        text = Regex.Replace(text, @"(?<=[\p{L}\d])['’‘´`](?=[\p{L}\d])", "");
+
+        // 5. Satır sonu hece bölmelerini birleştir (örn: anla- tıldı -> anlatıldı)
+        text = Regex.Replace(text, @"(\p{L}+)-\s+(\p{L}+)", "$1$2");
+
+        // 5b. Satır sonu karakterlerini (Enter / alt satıra geçiş) boşluğa çevir.
+        // Böylece TTS motorları (özellikle Emel / Edge TTS, Fahrettin ve SAPI) her satır sonunda
+        // yapay bir duraklama veya nefes alma yapmaz, cümle ve paragraf akıcı okunur.
+        text = Regex.Replace(text, @"[\r\n]+", " ");
+
+        // 6. Yüzde işareti (%50 -> yüzde 50)
+        text = Regex.Replace(text, @"%(\s*\d+)", "yüzde $1");
+
+        // 7. Yaygın Türkçe kısaltmaları doğal okunuşlarına aç
+        text = Regex.Replace(text, @"\bvb\.", "ve benzeri");
+        text = Regex.Replace(text, @"\bvs\.", "ve saire");
+        text = Regex.Replace(text, @"\börn\.", "örneğin");
+        text = Regex.Replace(text, @"\bbkz\.", "bakınız");
+        text = Regex.Replace(text, @"\bsf\.\s*(?=\d)|\bs\.\s*(?=\d)", "sayfa ");
+        text = Regex.Replace(text, @"\byy\.", "yüzyıl");
+        text = Regex.Replace(text, @"\bdk\.", "dakika");
+        text = Regex.Replace(text, @"\bsn\.", "saniye");
+        text = Regex.Replace(text, @"\bDr\.", "Doktor");
+        text = Regex.Replace(text, @"\bProf\.", "Profesör");
+        text = Regex.Replace(text, @"\bDoç\.", "Doçent");
+        text = Regex.Replace(text, @"\bAv\.", "Avukat");
+        text = Regex.Replace(text, @"\bM\.Ö\.", "Milattan önce");
+        text = Regex.Replace(text, @"\bM\.S\.", "Milattan sonra");
+        text = Regex.Replace(text, @"\bHz\.", "Hazreti");
+
+        // 8. Parantez ve köşeli ayraçlar: ( ) [ ] { } < > -> hafif duraklama (virgül) veya boşluk
+        text = Regex.Replace(text, @"[\[\(\{<]+", ", ");
+        text = Regex.Replace(text, @"[\]\)\}>]+", ", ");
+
+        // 9. Kalan tırnak işaretleri: " “ ” ‘ ’ ` « »
+        text = Regex.Replace(text, "[\"“”«»„‟'’‘´`]", " ");
+
+        // 10. Konuşma çizgileri ve tireler: — – -- (diyalog başındaki veya arasındaki tireleri virgüle/boşluğa dönüştür)
+        text = Regex.Replace(text, @"(?:^|\s)[—–\-]{1,3}\s*", ", ");
+        text = Regex.Replace(text, @"\s*[—–]{1,3}\s*", ", ");
+
+        // 11. Kelime arasındaki eğik çizgiler (ve/veya -> ve veya)
+        text = Regex.Replace(text, @"(?<=\p{L})/(?=\p{L})", " ");
+
+        // 12. Ardışık noktalar (... veya …), ardışık soru ve ünlem işaretleri (???, !!!, ?!)
+        text = text.Replace("…", ".");
+        text = Regex.Replace(text, @"\.{2,}", ".");
+        text = Regex.Replace(text, @"\?{2,}", "?");
+        text = Regex.Replace(text, @"!{2,}", "!");
+        text = Regex.Replace(text, @"\?!|!\?", "?");
+
+        // 9. Ardışık virgül ve noktalı işaretleri sadeleştir (örn: ", , " -> ", ")
+        text = Regex.Replace(text, @"\s*,\s*,+", ", ");
+        text = Regex.Replace(text, @"\s*,\s*\.", ".");
+        text = Regex.Replace(text, @"\s*\.\s*,", ".");
+
+        // 10. Fazla boşlukları temizle
+        text = Regex.Replace(text, @"[ \t]+", " ").Trim();
+
+        // Yalnızca virgül veya noktalama kalmışsa boşalt
+        if (Regex.IsMatch(text, @"^[\s,.\-;:!?]+$")) return "";
+
+        return text;
     }
 
     public static IEnumerable<string> SplitIntoChunks(string text, int limit = 2500)
@@ -296,10 +431,13 @@ public sealed class TtsService : IDisposable
             for (int i = 0; i < chunks.Count; i++)
             {
                 ct.ThrowIfCancellationRequested();
+                var cleanChunk = SanitizeForSpeech(chunks[i]);
+                if (string.IsNullOrWhiteSpace(cleanChunk)) continue;
+
                 var part = Path.Combine(AppPaths.TempDir, $"tts_part_{Guid.NewGuid():N}.wav");
                 try
                 {
-                    await engine.SynthesizeToWavAsync(chunks[i], voice, s.TtsSpeechRate, s.TtsPitch, part, ct);
+                    await engine.SynthesizeToWavAsync(cleanChunk, voice, s.TtsSpeechRate, s.TtsPitch, part, ct);
                     if (File.Exists(part) && new FileInfo(part).Length > 44) temps.Add(part);
                 }
                 catch (OperationCanceledException) { throw; }
@@ -338,6 +476,7 @@ public sealed class TtsService : IDisposable
     public void Dispose()
     {
         Stop();
+        _sleep.Stop();
         foreach (var e in _engines) e.Dispose();
     }
 }

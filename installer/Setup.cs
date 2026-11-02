@@ -17,8 +17,8 @@ using Microsoft.Win32;
 [assembly: AssemblyTrademark("omergoktas.net")]
 [assembly: AssemblyCulture("")]
 [assembly: ComVisible(false)]
-[assembly: AssemblyVersion("1.0.1.0")]
-[assembly: AssemblyFileVersion("1.0.1.0")]
+[assembly: AssemblyVersion("2.0.0.0")]
+[assembly: AssemblyFileVersion("2.0.0.0")]
 
 namespace ErisilebilirKitapOkuyucu.Setup
 {
@@ -431,7 +431,7 @@ namespace ErisilebilirKitapOkuyucu.Setup
                     if (key != null)
                     {
                         key.SetValue("DisplayName", "Erişilebilir Kitap Okuyucu");
-                        key.SetValue("DisplayVersion", "1.0.1");
+                        key.SetValue("DisplayVersion", "2.0.0");
                         key.SetValue("Publisher", "omergoktas.net");
                         key.SetValue("InstallLocation", installDir);
                         key.SetValue("DisplayIcon", exePath);

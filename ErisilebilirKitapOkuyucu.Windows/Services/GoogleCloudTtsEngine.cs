@@ -255,7 +255,9 @@ public sealed class GoogleCloudTtsEngine : ITtsEngine
         return Task.CompletedTask;
     }
 
-    public async Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct)
+    public Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct) => SpeakAsync(text, voiceId, rate, pitch, 1.0f, ct);
+
+    public async Task SpeakAsync(string text, string? voiceId, float rate, float pitch, float volume, CancellationToken ct)
     {
         string selectedVoice = string.IsNullOrEmpty(voiceId) || voiceId == "tr-TR-Neural2-A" ? "tr-TR-Wavenet-A" : voiceId;
 
@@ -313,6 +315,7 @@ public sealed class GoogleCloudTtsEngine : ITtsEngine
                 tcs.TrySetCanceled(ct);
             });
 
+            waveOut.Volume = Math.Clamp(volume, 0.0f, 1.0f);
             waveOut.Init(mp3Reader);
             waveOut.Play();
 

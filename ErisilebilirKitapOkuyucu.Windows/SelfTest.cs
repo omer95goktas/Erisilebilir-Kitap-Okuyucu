@@ -37,6 +37,7 @@ public static class SelfTest
             await TestRepository(dir);
             await TestTts(dir);
             await TestAudio(dir);
+            TestShortcuts();
             await TestUi(dir);
             try { Directory.Delete(dir, true); } catch { }
         }
@@ -85,6 +86,50 @@ public static class SelfTest
             Check("DOCX metin çıkarma", t.Contains("Birinci paragraf şöyle başlar.") && t.Contains("İkinci paragraf") && t.Contains("devam eder."), t.Replace("\n", "|"));
         }
 
+        // DOC (Klasik Word 97-2003 / RTF uyumlu belge)
+        var docFile = Path.Combine(dir, "eski_belge.doc");
+        var rtfSample = "{\\rtf1\\ansi\\ansicpg1254\\deff0 {\\fonttbl{\\f0 Segoe UI;}}\\f0\\fs24 Eski Word belgesi birinci paragraf.\\par \\'ddkinci sat\\'fdr devam ediyor.\\par}";
+        File.WriteAllBytes(docFile, Encoding.GetEncoding(1254).GetBytes(rtfSample));
+        Check("ImportService DOC dosya tanıma", ImportService.DetectType(docFile) == BookType.DOCX, "DOC -> DOCX (Word)");
+        using (var s = await DocumentSession.OpenAsync(new BookItem { UriString = docFile, Type = BookType.DOCX }))
+        {
+            var t = await s.GetPageTextAsync(1);
+            Check("DOC metin çıkarma", t.Contains("Eski Word belgesi birinci paragraf.") && t.Contains("İkinci satır devam ediyor."), t.Replace("\n", "|"));
+        }
+
+        // XLSX (Excel Çalışma Kitabı ve Tablo)
+        var xlsxFile = Path.Combine(dir, "tablo.xlsx");
+        using (var z = ZipFile.Open(xlsxFile, ZipArchiveMode.Create))
+        {
+            void AddZipEntry(string name, string content)
+            {
+                var ze = z.CreateEntry(name);
+                using var sw = new StreamWriter(ze.Open(), new UTF8Encoding(false));
+                sw.Write(content);
+            }
+
+            AddZipEntry("xl/workbook.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><workbook xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"Notlar\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>");
+            AddZipEntry("xl/_rels/workbook.xml.rels", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>");
+            AddZipEntry("xl/sharedStrings.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><sst xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\" count=\"4\" uniqueCount=\"4\"><si><t>Öğrenci</t></si><si><t>Ders</t></si><si><t>Ahmet Yılmaz</t></si><si><t>Matematik</t></si></sst>");
+            AddZipEntry("xl/worksheets/sheet1.xml", "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><worksheet xmlns=\"http://schemas.openxmlformats.org/spreadsheetml/2006/main\"><sheetData><row r=\"1\"><c r=\"A1\" t=\"s\"><v>0</v></c><c r=\"B1\" t=\"s\"><v>1</v></c></row><row r=\"2\"><c r=\"A2\" t=\"s\"><v>2</v></c><c r=\"B2\" t=\"s\"><v>3</v></c></row></sheetData></worksheet>");
+        }
+        Check("ImportService XLSX dosya tanıma", ImportService.DetectType(xlsxFile) == BookType.XLSX, "XLSX -> XLSX (Excel)");
+        using (var s = await DocumentSession.OpenAsync(new BookItem { UriString = xlsxFile, Type = BookType.XLSX }))
+        {
+            var t = await s.GetPageTextAsync(1);
+            Check("XLSX metin çıkarma", t.Contains("Çalışma Sayfası: Notlar") && t.Contains("Öğrenci | Ders") && t.Contains("Ahmet Yılmaz | Matematik"), t.Replace("\r\n", " # "));
+        }
+
+        // MD (Markdown)
+        var mdFile = Path.Combine(dir, "notlar.md");
+        File.WriteAllText(mdFile, "# Başlık\r\n\r\nMarkdown birinci paragraf.\r\n\r\nMarkdown ikinci paragraf.", new UTF8Encoding(false));
+        Check("ImportService MD dosya tanıma", ImportService.DetectType(mdFile) == BookType.TXT, "MD -> TXT");
+        using (var s = await DocumentSession.OpenAsync(new BookItem { UriString = mdFile, Type = BookType.TXT }))
+        {
+            var t = await s.GetPageTextAsync(1);
+            Check("MD metin çıkarma", t.Contains("Markdown birinci paragraf.") && t.Contains("Markdown ikinci paragraf."), t.Replace("\r\n", "|"));
+        }
+
         // EPUB (spine sırası)
         var epub = Path.Combine(dir, "t.epub");
         using (var z = ZipFile.Open(epub, ZipArchiveMode.Create))
@@ -130,6 +175,15 @@ public static class SelfTest
                         reflowParas[0].Contains("görsel olarak burada kesilmiştir.") &&
                         reflowParas[1].Contains("arkadaşlar kelimesini");
         Check("PDF Paragraf Algılama ve Satır Reflow", reflowOk, $"{reflowParas.Length} paragraf tespit edildi");
+
+        // PDF Gölge / Çift Katman Metin Ayıklama (Shadow Text Deduplication)
+        string shadowSample = "9. Sınıf9. Sınıf\r\nDers KitabıDers Kitabı\r\nBiyolojiBiyoloji\r\nTEMA TEMA Yaşam Bilimi\r\nGELİŞTİRİCİ VE İLETİŞİMGELİŞTİRİCİ VE İLETİŞİM";
+        string cleanedShadow = TextExtractor.ReflowPdfText(shadowSample);
+        bool shadowOk = cleanedShadow.Contains("9. Sınıf") && !cleanedShadow.Contains("9. Sınıf9. Sınıf") &&
+                        cleanedShadow.Contains("Ders Kitabı") && !cleanedShadow.Contains("Ders KitabıDers Kitabı") &&
+                        cleanedShadow.Contains("Biyoloji") && !cleanedShadow.Contains("BiyolojiBiyoloji") &&
+                        cleanedShadow.Contains("GELİŞTİRİCİ VE İLETİŞİM") && !cleanedShadow.Contains("İLETİŞİMGELİŞTİRİCİ");
+        Check("PDF Gölge ve Çift Katman Metin Ayıklama", shadowOk, "Tekrarlı gölge başlıklar temizlendi");
 
         // Gerçek PDF'ler (varsa)
         if (extraPdfDir != null && Directory.Exists(extraPdfDir))
@@ -177,6 +231,31 @@ public static class SelfTest
         Check("Klasör silinince kitap Ana Dizin'e taşınır", again.GetBook(book.Id)?.FolderName == BookItem.RootFolder);
         again.RemoveBook(book.Id);
         Check("Kitap silme", again.Books.Count == before && File.Exists(f), "orijinal dosya korundu");
+
+        // Ayarları Dışa ve İçe Aktarma (Settings Export & Import)
+        var settingsExportFile = Path.Combine(dir, "exported_settings.json");
+        var customS = new AppSettings
+        {
+            TtsSpeechRate = 1.35f,
+            TtsPitch = 0.9f,
+            AppTheme = "Koyu",
+            TtsReadMode = "Paragraf",
+            CustomShortcuts = new Dictionary<string, string> { { "Reader.NextPage", "Ctrl+Alt+PageDown" } }
+        };
+        again.UpdateSettings(customS);
+        again.ExportSettings(settingsExportFile);
+        Check("Ayarları Dışa Aktarma (JSON)", File.Exists(settingsExportFile) && new FileInfo(settingsExportFile).Length > 50, $"{new FileInfo(settingsExportFile).Length} bayt");
+
+        // Ayarları sıfırla, ardından içe aktar
+        again.UpdateSettings(new AppSettings());
+        bool importOk = again.ImportSettings(settingsExportFile);
+        bool settingsMatch = importOk &&
+                             Math.Abs(again.Settings.TtsSpeechRate - 1.35f) < 0.01 &&
+                             again.Settings.AppTheme == "Koyu" &&
+                             again.Settings.TtsReadMode == "Paragraf" &&
+                             again.Settings.CustomShortcuts.ContainsKey("Reader.NextPage");
+        Check("Ayarları İçe Aktarma ve Geri Yükleme", settingsMatch, "Tüm ayarlar ve kısayollar eksiksiz geri yüklendi");
+
         return Task.CompletedTask;
     }
 
@@ -201,6 +280,38 @@ public static class SelfTest
                 Check($"{engine.DisplayName}: WAV sentezi", len > 4000 && secs > 0.5, $"{len} bayt, {secs:0.0} sn");
             }
             catch (Exception e) { Fail($"{engine.DisplayName}: WAV sentezi", e.Message); }
+
+            if (engine.Id == "sherpa")
+            {
+                var azVoice = voices.FirstOrDefault(v => v.Language.StartsWith("az", StringComparison.OrdinalIgnoreCase))?.Id;
+                if (azVoice != null)
+                {
+                    var azWav = Path.Combine(dir, "tts_sherpa_az.wav");
+                    try
+                    {
+                        await engine.SynthesizeToWavAsync("Salam dünya. Azərbaycan dilində kitabları oxuyuruq.", azVoice, 1.0f, 1.0f, azWav, CancellationToken.None);
+                        var azLen = File.Exists(azWav) ? new FileInfo(azWav).Length : 0;
+                        Check("Meta MMS Azerbaycan Sesi (Çevrim Dışı): WAV sentezi", azLen > 4000, $"{azLen} bayt");
+                    }
+                    catch (Exception e) { Fail("Meta MMS Azerbaycan Sesi (Çevrim Dışı): WAV sentezi", e.Message); }
+                }
+            }
+
+            if (engine.Id == "edge")
+            {
+                var azVoice = voices.FirstOrDefault(v => v.Language.StartsWith("az", StringComparison.OrdinalIgnoreCase))?.Id;
+                if (azVoice != null)
+                {
+                    var azWav = Path.Combine(dir, "tts_edge_az.wav");
+                    try
+                    {
+                        await engine.SynthesizeToWavAsync("Salam dünya. Azərbaycan dilində kitabları oxuyuruq.", azVoice, 1.0f, 1.0f, azWav, CancellationToken.None);
+                        var azLen = File.Exists(azWav) ? new FileInfo(azWav).Length : 0;
+                        Check("Microsoft Edge TTS (Azerbaycan Sesi): WAV sentezi", azLen > 4000, $"{azLen} bayt");
+                    }
+                    catch (Exception e) { Fail("Microsoft Edge TTS (Azerbaycan Sesi): WAV sentezi", e.Message); }
+                }
+            }
 
             // Canlı konuşma + hız/perde parametreleri
             try
@@ -236,20 +347,59 @@ public static class SelfTest
         var pSplits = TtsService.Split(pText, true);
         Check("Paragraf bölme ve vurgulama konumları", pSplits.Count == 3 && pSplits.All(x => pText.Substring(x.Start, x.Length) == x.Text), $"Paragraf sayısı: {pSplits.Count} => " + string.Join(" || ", pSplits.Select(x => x.Text)));
 
+        // Boşluklu satırlarda paragraf ve cümle bölme
+        var pTextWithSpaces = "Birinci paragraf ilk cümle.\r\n \r\nİkinci paragraf tek cümle.\r\n \r\nÜçüncü paragraf son cümle.";
+        var pSplitsSpaces = TtsService.Split(pTextWithSpaces, true);
+        Check("Boşluklu satırlarda paragraf bölme", pSplitsSpaces.Count == 3 && pSplitsSpaces.All(x => pTextWithSpaces.Substring(x.Start, x.Length) == x.Text), $"Paragraf sayısı: {pSplitsSpaces.Count}");
+        var sSplitsSpaces = TtsService.Split(pTextWithSpaces, false);
+        Check("Boşluklu satırlarda cümle bölme", sSplitsSpaces.Count == 3 && sSplitsSpaces.All(x => pTextWithSpaces.Substring(x.Start, x.Length) == x.Text), $"Cümle sayısı: {sSplitsSpaces.Count}");
+
         // TtsService döngüsü: cümle olayları + sayfa sonu
-        var events = new List<int>(); var completed = false;
-        void OnS(int i) => events.Add(i); void OnC() => completed = true;
-        tts.SentenceChanged += OnS; tts.PageCompleted += OnC;
-        tts.LoadPageText("Bir. İki. Üç.");
-        tts.StartSpeaking(0);
-        for (int i = 0; i < 300 && !completed; i++) await Task.Delay(100);
-        tts.SentenceChanged -= OnS; tts.PageCompleted -= OnC;
-        Check("TtsService cümle cümle okuma ve sayfa sonu", completed && events.SequenceEqual(new[] { 0, 1, 2 }), $"olaylar: {string.Join(",", events)} tamamlandı={completed}");
+        var prevMode = repo.Settings.TtsReadMode;
+        repo.Settings.TtsReadMode = "Cümle";
+        try
+        {
+            var events = new List<int>(); var completed = false;
+            void OnS(int i) => events.Add(i); void OnC() => completed = true;
+            tts.SentenceChanged += OnS; tts.PageCompleted += OnC;
+            tts.LoadPageText("Bir. İki. Üç.");
+            tts.StartSpeaking(0);
+            for (int i = 0; i < 300 && !completed; i++) await Task.Delay(100);
+            tts.SentenceChanged -= OnS; tts.PageCompleted -= OnC;
+            Check("TtsService cümle cümle okuma ve sayfa sonu", completed && events.SequenceEqual(new[] { 0, 1, 2 }), $"olaylar: {string.Join(",", events)} tamamlandı={completed}");
+        }
+        finally
+        {
+            repo.Settings.TtsReadMode = prevMode;
+        }
 
         // Durdurma
         tts.LoadPageText(string.Join(" ", Enumerable.Repeat("Uzun bir cümle okunuyor.", 30)));
         tts.StartSpeaking(0); await Task.Delay(600); tts.Stop(); await Task.Delay(300);
         Check("TtsService durdurma", !tts.IsSpeaking);
+
+        // TTS Ses düzeyi (TtsVolume) ayarı ve kalıcılığı
+        var initialVol = repo.Settings.TtsVolume;
+        repo.Settings.TtsVolume = 0.75f;
+        repo.UpdateSettings(repo.Settings);
+        var reloadedSettings = new BookRepository().Settings;
+        Check("TTS Ses düzeyi ayarı kalıcılığı", Math.Abs(reloadedSettings.TtsVolume - 0.75f) < 0.01f, $"Kaydedilen: {reloadedSettings.TtsVolume:0.00}");
+        repo.Settings.TtsVolume = initialVol;
+        repo.UpdateSettings(repo.Settings);
+
+        // TTS Noktalama ve Sembol Filtreleme (SanitizeForSpeech)
+        var dirty = "* Bu bir yıldızlı **önemli** nottur! (Açıklama) Ali/Veli — Bekliyorum...";
+        var clean = TtsService.SanitizeForSpeech(dirty);
+        Check("TTS sembol ve noktalama temizleme", !clean.Contains("*") && !clean.Contains("(") && !clean.Contains("—") && clean.Contains("Bu bir yıldızlı"), clean);
+        Check("Yalnızca sembolden oluşan satır boşaltılır", TtsService.SanitizeForSpeech("*** --- ...") == "", "başarılı");
+        Check("Kesme işareti ek birleştirme ve kısaltmalar", TtsService.SanitizeForSpeech("Türkiye'de Dr. Ahmet %50 artış ve vb. durumlar").Contains("Türkiyede Doktor Ahmet yüzde 50 artış ve ve benzeri"), TtsService.SanitizeForSpeech("Türkiye'de Dr. Ahmet %50 artış ve vb. durumlar"));
+        Check("Alt satır duraklamasını önleme (satır sonları boşluğa dönüşür)", TtsService.SanitizeForSpeech("Bu birinci satır\r\nbu da ikinci satır") == "Bu birinci satır bu da ikinci satır", TtsService.SanitizeForSpeech("Bu birinci satır\r\nbu da ikinci satır"));
+
+        // TTS Uyku Zamanlayıcısı testi
+        tts.StartSleepTimer(15);
+        Check("TTS Uyku Zamanlayıcısı başlatma", tts.SleepSecondsLeft > 800 && tts.SleepSecondsLeft <= 900, $"{tts.SleepSecondsLeft} sn kaldı");
+        tts.StartSleepTimer(0);
+        Check("TTS Uyku Zamanlayıcısı kapatma", tts.SleepSecondsLeft == 0, "başarıyla sıfırlandı");
 
         // Dışa aktarma
         var outWav = Path.Combine(dir, "export.wav");
@@ -283,11 +433,56 @@ public static class SelfTest
         Check("İleri sarma", a.PositionMs > 3000, $"{a.PositionMs} ms");
         a.SetSpeed(2.0); await Task.Delay(1200);
         Check("Hız ayarı", Math.Abs(a.Speed - 2.0) < 0.01);
+        Check("Evrensel hız biçimlendirmesi", Fmt.Speed(1.0) == "1x" && Fmt.Speed(1.5) == "1.5x" && Fmt.Speed(2.0) == "2x" && Fmt.Speed(1.25) == "1.25x", "1x, 1.5x, 2x, 1.25x");
         a.TogglePlayPause(); var p1 = a.PositionMs; await Task.Delay(700);
         Check("Duraklatma", !a.IsPlaying && Math.Abs(a.PositionMs - p1) < 300);
         a.StartSleepTimer(1);
         Check("Uyku zamanlayıcısı kuruldu", a.SleepSecondsLeft is > 50 and <= 60);
         a.StartSleepTimer(0); a.Stop();
+    }
+
+    // ---------------------------------------------------------------- kısayollar
+    private static void TestShortcuts()
+    {
+        // 1. Tanımlı kısayolların varlığı ve kategoriler
+        var all = ShortcutService.Definitions;
+        Check("Klavye kısayolları tanımları yüklendi", all.Count >= 35, $"{all.Count} kısayol tanımlı");
+        
+        var catReader = all.Where(d => d.Category == ShortcutService.CatReader).ToList();
+        var catAudio = all.Where(d => d.Category == ShortcutService.CatAudio).ToList();
+        var catGeneral = all.Where(d => d.Category == ShortcutService.CatGeneral).ToList();
+        Check("Kategorilendirilmiş kısayol listeleri", catReader.Count >= 20 && catAudio.Count >= 12 && catGeneral.Count >= 3,
+            $"Okuma: {catReader.Count}, Sesli: {catAudio.Count}, Genel: {catGeneral.Count}");
+
+        // 2. Formatlama
+        var strF1 = ShortcutService.FormatCombo(Key.F1, ModifierKeys.None);
+        var strCtrlT = ShortcutService.FormatCombo(Key.T, ModifierKeys.Control);
+        var strCtrlShiftS = ShortcutService.FormatCombo(Key.S, ModifierKeys.Control | ModifierKeys.Shift);
+        Check("Kısayol tuş kombinasyonu metin biçimlendirmesi", strF1 == "F1" && strCtrlT.Contains("Ctrl") && strCtrlT.Contains("T") && strCtrlShiftS.Contains("Ctrl") && strCtrlShiftS.Contains("Shift") && strCtrlShiftS.Contains("S"),
+            $"{strF1}, {strCtrlT}, {strCtrlShiftS}");
+
+        // 3. Özelleştirme ve Kaydetme
+        var origSleepKey = ShortcutService.GetCurrent("Reader.SleepTimer");
+        Check("Uyku modu varsayılan kısayol kontrolü", origSleepKey.Key == Key.T && origSleepKey.Modifiers == ModifierKeys.Control);
+
+        ShortcutService.SaveShortcut("Reader.SleepTimer", Key.U, ModifierKeys.Control | ModifierKeys.Alt);
+        var newSleepKey = ShortcutService.GetCurrent("Reader.SleepTimer");
+        Check("Kısayol özelleştirme ve anlık yansıma", newSleepKey.Key == Key.U && newSleepKey.Modifiers == (ModifierKeys.Control | ModifierKeys.Alt));
+        Check("Özelleştirilmiş durum kontrolü", ShortcutService.IsCustomized("Reader.SleepTimer"));
+
+        // 4. Çakışma denetimi
+        var conflictName = ShortcutService.FindConflict("Reader.TogglePlay", Key.U, ModifierKeys.Control | ModifierKeys.Alt);
+        Check("Kısayol çakışma tespiti", conflictName != null, conflictName ?? "Yok");
+
+        // 5. Sıfırlama
+        ShortcutService.ResetShortcut("Reader.SleepTimer");
+        var resetSleepKey = ShortcutService.GetCurrent("Reader.SleepTimer");
+        Check("Tekil kısayolu varsayılana sıfırlama", resetSleepKey.Key == Key.T && resetSleepKey.Modifiers == ModifierKeys.Control && !ShortcutService.IsCustomized("Reader.SleepTimer"));
+
+        // 6. Tümünü sıfırlama
+        ShortcutService.SaveShortcut("General.Help", Key.H, ModifierKeys.Control);
+        ShortcutService.ResetAll();
+        Check("Tüm kısayolları sıfırlama", !ShortcutService.IsCustomized("General.Help"));
     }
 
     // ---------------------------------------------------------------- arayüz
@@ -317,11 +512,23 @@ public static class SelfTest
         AuditPage("Belge okuyucu", mw);
         var reader = FindPage<ReaderPage>(mw);
         var textBox = Descendants<TextBox>(reader!).FirstOrDefault(t => t.IsReadOnly);
-        Check("Okuyucu standart metin alanına sahip", textBox != null && textBox.Text.Contains("Ekran okuyucu denemesi"), textBox?.Text);
+        Check("Okuyucu standart metin alanına sahip", textBox != null && textBox.Text.Contains("Ekran okuyucu denemesi"), textBox?.Text ?? "");
         var focused = Keyboard.FocusedElement as TextBox;
         Check("Açılışta odak metin alanında (imleç etkin)", focused != null && focused.IsReadOnlyCaretVisible);
-        App.Tts.StartSpeaking(0); for (int w = 0; w < 100 && (textBox == null || textBox.SelectionLength == 0); w++) await Task.Delay(100);
-        Check("Okuma sırasında cümle seçimi ilerliyor", textBox != null && textBox.SelectionLength > 0, $"seçim: {textBox?.SelectedText}");
+        App.Tts.StartSpeaking(0);
+        int seenSelection = 0;
+        string lastSel = "";
+        for (int w = 0; w < 100; w++)
+        {
+            await Task.Delay(100);
+            if (textBox != null && textBox.SelectionLength > 0)
+            {
+                seenSelection = textBox.SelectionLength;
+                lastSel = textBox.SelectedText;
+                break;
+            }
+        }
+        Check("Okuma sırasında cümle seçimi ilerliyor", seenSelection > 0, $"seçim: {lastSel}");
         App.Tts.Stop();
         mw.OpenBook(ab); await Task.Delay(1500);
         AuditPage("Sesli kitap oynatıcı", mw);

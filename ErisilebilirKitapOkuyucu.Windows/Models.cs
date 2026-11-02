@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace ErisilebilirKitapOkuyucu;
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum BookType { PDF, TXT, EPUB, DOCX, AUDIO }
+public enum BookType { PDF, TXT, EPUB, DOCX, AUDIO, XLSX }
 
 public class Bookmark
 {
@@ -53,6 +53,7 @@ public class BookItem
         BookType.TXT => "Metin",
         BookType.EPUB => "EPUB",
         BookType.DOCX => "Word",
+        BookType.XLSX => "Excel",
         BookType.AUDIO => IsZipArchive ? "Sesli kitap (ZIP)" : "Sesli kitap",
         _ => ""
     };
@@ -84,6 +85,7 @@ public class AppSettings
 {
     public float TtsSpeechRate { get; set; } = 1.0f;
     public float TtsPitch { get; set; } = 1.0f;
+    public float TtsVolume { get; set; } = 1.0f;
     public bool AutoNextPage { get; set; } = true;
     public bool HighContrastMode { get; set; } = false;
     /// <summary>"Sistem", "Acik" veya "Koyu".</summary>
@@ -101,6 +103,8 @@ public class AppSettings
     public string TtsReadMode { get; set; } = "Cümle";
     /// <summary>Kullanıcının kendi Google Cloud Text-to-Speech API anahtarı.</summary>
     public string? GoogleApiKey { get; set; }
+    /// <summary>Özelleştirilmiş klavye kısayolları (Eylem Kimliği -> Tuş Tanımı, örn: "Reader.TogglePlay" -> "Space").</summary>
+    public Dictionary<string, string> CustomShortcuts { get; set; } = new();
 }
 
 public record SearchResult(int Page, int LineIndex, string Snippet)
@@ -125,5 +129,14 @@ public static class Fmt
         if (t.Minutes > 0) parts.Add($"{t.Minutes} dakika");
         parts.Add($"{t.Seconds} saniye");
         return string.Join(" ", parts);
+    }
+
+    /// <summary>1x, 1.25x, 1.5x, 2x gibi evrensel oynatma hızı biçimlendirmesi.</summary>
+    public static string Speed(double speed)
+    {
+        var rounded = Math.Round(speed, 2);
+        if (Math.Abs(rounded - Math.Round(rounded)) < 0.001)
+            return $"{(int)rounded}x";
+        return $"{rounded.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)}x";
     }
 }

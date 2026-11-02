@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using System.Net.Http;
 using System.Formats.Tar;
 using System.IO.Compression;
@@ -14,11 +15,12 @@ namespace ErisilebilirKitapOkuyucu.Services;
 public sealed class SherpaTtsEngine : ITtsEngine
 {
     public string Id => "sherpa";
-    public string DisplayName => "Açık Kaynak Nöral Ses (Piper - Çevrim Dışı)";
+    public string DisplayName => "Açık Kaynak Nöral Ses (Piper & Meta - Çevrim Dışı)";
 
     private static readonly IReadOnlyList<VoiceDescriptor> _voices = new List<VoiceDescriptor>
     {
-        new("piper-fahrettin", "Piper Fahrettin Doğal (Erkek - Çevrim Dışı)", "tr-TR", "sherpa")
+        new("piper-fahrettin", "Piper Fahrettin Doğal (Erkek - Çevrim Dışı)", "tr-TR", "sherpa"),
+        new("meta-mms-azj", "Meta MMS Azerbaycan (Kadın - Çevrim Dışı)", "az-AZ", "sherpa")
     };
 
     private OfflineTts? _currentTts;
@@ -29,6 +31,7 @@ public sealed class SherpaTtsEngine : ITtsEngine
     private readonly object _playLock = new();
 
     private string? _prefetchedText;
+    private string? _prefetchedVoice;
     private Task<byte[]>? _prefetchTask;
     private CancellationTokenSource? _prefetchCts;
 
@@ -43,8 +46,11 @@ public sealed class SherpaTtsEngine : ITtsEngine
         // Kullanıcı bu sesi seçtiğinde veya okuma başlattığında yüklensin.
     }
 
-    private static string GetFolderName(string voiceId) => "vits-piper-tr_TR-fahrettin-medium";
-    private static string GetOnnxFileName(string voiceId) => "tr_TR-fahrettin-medium.onnx";
+    private static string GetFolderName(string voiceId) =>
+        voiceId == "meta-mms-azj" ? "vits-mms-azj-script_latin" : "vits-piper-tr_TR-fahrettin-medium";
+
+    private static string GetOnnxFileName(string voiceId) =>
+        voiceId == "meta-mms-azj" ? "model.onnx" : "tr_TR-fahrettin-medium.onnx";
 
     public static string? FindModelDirectory(string voiceId)
     {
@@ -52,8 +58,7 @@ public sealed class SherpaTtsEngine : ITtsEngine
         string[] candidates =
         {
             Path.Combine(AppPaths.DataDir, "models", folder),
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", folder),
-            @"C:\Users\gokta\.gemini\antigravity\scratch\models\" + folder
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "models", folder)
         };
 
         foreach (var dir in candidates)
@@ -71,11 +76,26 @@ public sealed class SherpaTtsEngine : ITtsEngine
         var dir = FindModelDirectory(voiceId);
         if (dir != null) return;
 
-        // Model klasörü bulunamadıysa AppPaths.DataDir/models altına indir
         string folder = GetFolderName(voiceId);
         string targetDir = Path.Combine(AppPaths.DataDir, "models", folder);
-        Directory.CreateDirectory(Path.Combine(AppPaths.DataDir, "models"));
+        Directory.CreateDirectory(targetDir);
 
+        if (voiceId == "meta-mms-azj")
+        {
+            AppPaths.Log($"SherpaTtsEngine: Meta MMS modeli indiriliyor ({folder})...");
+            using var client = new HttpClient();
+            string modelUrl = "https://huggingface.co/willwade/mms-tts-multilingual-models-onnx/resolve/main/azj-script_latin/model.onnx";
+            string tokensUrl = "https://huggingface.co/willwade/mms-tts-multilingual-models-onnx/resolve/main/azj-script_latin/tokens.txt";
+
+            var tokensData = client.GetByteArrayAsync(tokensUrl).GetAwaiter().GetResult();
+            File.WriteAllBytes(Path.Combine(targetDir, "tokens.txt"), tokensData);
+
+            var modelData = client.GetByteArrayAsync(modelUrl).GetAwaiter().GetResult();
+            File.WriteAllBytes(Path.Combine(targetDir, "model.onnx"), modelData);
+            return;
+        }
+
+        // Model klasörü bulunamadıysa AppPaths.DataDir/models altına indir
         AppPaths.Log($"SherpaTtsEngine: Model eksik, indiriliyor: {folder}...");
         string url = $"https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/{folder}.tar.bz2";
         string tarBz2Path = Path.Combine(AppPaths.DataDir, "models", $"{folder}.tar.bz2");
@@ -135,7 +155,21 @@ public sealed class SherpaTtsEngine : ITtsEngine
         var config = new OfflineTtsConfig();
         config.Model.Vits.Model = onnxFile;
         config.Model.Vits.Tokens = tokensFile;
-        config.Model.Vits.DataDir = dataDir;
+        if (Directory.Exists(dataDir))
+        {
+            config.Model.Vits.DataDir = dataDir;
+        }
+        else
+        {
+            config.Model.Vits.DataDir = "";
+        }
+        // Akustik ve artikülasyon optimizasyonu (harf yutulmasını önleme)
+        // Varsayılan NoiseScale 0.667f -> 0.333f: Daha net, kararlı ve duru ses
+        config.Model.Vits.NoiseScale = 0.333f;
+        // Varsayılan NoiseScaleW 0.8f -> 0.4f: Fonem sürelerindeki aşırı rastgele oynamayı ve harflerin yutulmasını engeller
+        config.Model.Vits.NoiseScaleW = 0.4f;
+        config.Model.Vits.LengthScale = 1.0f;
+        config.SilenceScale = 0.35f; // Cümle ve virgül duraklamalarını rahatlatır
         config.Model.NumThreads = Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
         config.Model.Provider = "cpu";
         config.Model.Debug = 0;
@@ -150,8 +184,73 @@ public sealed class SherpaTtsEngine : ITtsEngine
         return tts;
     }
 
-    private byte[] GenerateWavBytes(string text, string voiceId, float rate)
+    public static void SynthesizeMmsDirect(string textFile, string outputFile, float speed, float pitch)
     {
+        var text = File.ReadAllText(textFile, Encoding.UTF8);
+        var modelDir = FindModelDirectory("meta-mms-azj");
+        if (modelDir == null) throw new DirectoryNotFoundException("MMS model dizini bulunamadı.");
+
+        var onnxFile = Path.Combine(modelDir, GetOnnxFileName("meta-mms-azj"));
+        var tokensFile = Path.Combine(modelDir, "tokens.txt");
+
+        var config = new OfflineTtsConfig();
+        config.Model.Vits.Model = onnxFile;
+        config.Model.Vits.Tokens = tokensFile;
+        config.Model.Vits.DataDir = "";
+        config.Model.NumThreads = Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
+        config.Model.Provider = "cpu";
+
+        using var tts = new OfflineTts(config);
+        var audio = tts.Generate(text, speed, 0);
+        if (audio.Samples == null || audio.Samples.Length == 0)
+            throw new InvalidOperationException("MMS ses verisi üretemedi.");
+
+        var samples = audio.Samples;
+        if (Math.Abs(pitch - 1.0f) > 0.02f)
+        {
+            float pitchFactor = Math.Clamp(pitch, 0.5f, 2.0f);
+            var shifter = new NAudio.Dsp.SmbPitchShifter();
+            shifter.PitchShift(pitchFactor, samples.Length, 1024, 4, audio.SampleRate, samples);
+        }
+
+        using var writer = new WaveFileWriter(outputFile, WaveFormat.CreateIeeeFloatWaveFormat(audio.SampleRate, 1));
+        writer.WriteSamples(samples, 0, samples.Length);
+    }
+
+    private byte[] GenerateWavBytes(string text, string voiceId, float rate, float pitch = 1.0f)
+    {
+        if (voiceId == "meta-mms-azj")
+        {
+            EnsureModelExists("meta-mms-azj");
+            var tempText = Path.Combine(AppPaths.TempDir, $"mms_in_{Guid.NewGuid():N}.txt");
+            var tempWav = Path.Combine(AppPaths.TempDir, $"mms_out_{Guid.NewGuid():N}.wav");
+            try
+            {
+                File.WriteAllText(tempText, text, Encoding.UTF8);
+                var exe = Environment.ProcessPath ?? System.Diagnostics.Process.GetCurrentProcess().MainModule?.FileName;
+                if (!string.IsNullOrEmpty(exe))
+                {
+                    float speedMms = Math.Clamp(rate, 0.5f, 3.0f);
+                    var psi = new System.Diagnostics.ProcessStartInfo(exe, $"--mms-synth \"{tempText}\" \"{tempWav}\" {speedMms.ToString(System.Globalization.CultureInfo.InvariantCulture)} {pitch.ToString(System.Globalization.CultureInfo.InvariantCulture)}")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    using var proc = System.Diagnostics.Process.Start(psi);
+                    proc?.WaitForExit();
+                    if (File.Exists(tempWav))
+                    {
+                        return File.ReadAllBytes(tempWav);
+                    }
+                }
+            }
+            finally
+            {
+                try { if (File.Exists(tempText)) File.Delete(tempText); } catch { }
+                try { if (File.Exists(tempWav)) File.Delete(tempWav); } catch { }
+            }
+        }
+
         var tts = GetOrLoadTts(voiceId);
 
         // Piper hız katsayısı: 1.0f = normal, 1.2f = %20 daha hızlı
@@ -163,10 +262,19 @@ public sealed class SherpaTtsEngine : ITtsEngine
             throw new InvalidOperationException("Piper ses verisi üretemedi.");
         }
 
+        var samples = audio.Samples;
+        // Ses perdesi (pitch) modifikasyonu (0.5x - 2.0x, 1.0x normal)
+        if (Math.Abs(pitch - 1.0f) > 0.02f)
+        {
+            float pitchFactor = Math.Clamp(pitch, 0.5f, 2.0f);
+            var shifter = new NAudio.Dsp.SmbPitchShifter();
+            shifter.PitchShift(pitchFactor, samples.Length, 1024, 4, audio.SampleRate, samples);
+        }
+
         using var ms = new MemoryStream();
         using (var writer = new WaveFileWriter(ms, WaveFormat.CreateIeeeFloatWaveFormat(audio.SampleRate, 1)))
         {
-            writer.WriteSamples(audio.Samples, 0, audio.Samples.Length);
+            writer.WriteSamples(samples, 0, samples.Length);
         }
         return ms.ToArray();
     }
@@ -175,11 +283,11 @@ public sealed class SherpaTtsEngine : ITtsEngine
     {
         if (string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
 
-        string targetVoice = "piper-fahrettin";
+        string targetVoice = !string.IsNullOrWhiteSpace(voiceId) ? voiceId : "piper-fahrettin";
 
         lock (_playLock)
         {
-            if (_prefetchedText == text && _prefetchTask != null && !_prefetchTask.IsFaulted)
+            if (_prefetchedText == text && _prefetchedVoice == targetVoice && _prefetchTask != null && !_prefetchTask.IsFaulted)
             {
                 return Task.CompletedTask;
             }
@@ -187,12 +295,13 @@ public sealed class SherpaTtsEngine : ITtsEngine
             try { _prefetchCts?.Cancel(); _prefetchCts?.Dispose(); } catch { }
             _prefetchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             _prefetchedText = text;
+            _prefetchedVoice = targetVoice;
             _prefetchTask = Task.Run(async () =>
             {
                 await _synthLock.WaitAsync(_prefetchCts.Token);
                 try
                 {
-                    return GenerateWavBytes(text, targetVoice, rate);
+                    return GenerateWavBytes(text, targetVoice, rate, pitch);
                 }
                 finally
                 {
@@ -204,9 +313,11 @@ public sealed class SherpaTtsEngine : ITtsEngine
         return Task.CompletedTask;
     }
 
-    public async Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct)
+    public Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct) => SpeakAsync(text, voiceId, rate, pitch, 1.0f, ct);
+
+    public async Task SpeakAsync(string text, string? voiceId, float rate, float pitch, float volume, CancellationToken ct)
     {
-        string targetVoice = "piper-fahrettin";
+        string targetVoice = !string.IsNullOrWhiteSpace(voiceId) ? voiceId : "piper-fahrettin";
 
         try
         {
@@ -215,10 +326,11 @@ public sealed class SherpaTtsEngine : ITtsEngine
 
             lock (_playLock)
             {
-                if (_prefetchedText == text && _prefetchTask != null)
+                if (_prefetchedText == text && _prefetchedVoice == targetVoice && _prefetchTask != null)
                 {
                     existingTask = _prefetchTask;
                     _prefetchedText = null;
+                    _prefetchedVoice = null;
                     _prefetchTask = null;
                 }
             }
@@ -240,7 +352,7 @@ public sealed class SherpaTtsEngine : ITtsEngine
                 {
                     ct.ThrowIfCancellationRequested();
                     AppPaths.Log($"Sherpa TTS: '{targetVoice}' ile sentezleniyor (metin: {text.Length} karakter)...");
-                    var synthTask = Task.Run(() => GenerateWavBytes(text, targetVoice, rate));
+                    var synthTask = Task.Run(() => GenerateWavBytes(text, targetVoice, rate, pitch));
                     var completed = await Task.WhenAny(synthTask, Task.Delay(Timeout.Infinite, ct));
                     if (completed != synthTask)
                     {
@@ -280,6 +392,7 @@ public sealed class SherpaTtsEngine : ITtsEngine
                 tcs.TrySetCanceled(ct);
             });
 
+            waveOut.Volume = Math.Clamp(volume, 0.0f, 1.0f);
             waveOut.Init(wavReader);
             waveOut.Play();
 
@@ -298,12 +411,12 @@ public sealed class SherpaTtsEngine : ITtsEngine
 
     public async Task SynthesizeToWavAsync(string text, string? voiceId, float rate, float pitch, string path, CancellationToken ct)
     {
-        string targetVoice = "piper-fahrettin";
+        string targetVoice = !string.IsNullOrWhiteSpace(voiceId) ? voiceId : "piper-fahrettin";
 
         await _synthLock.WaitAsync(ct);
         try
         {
-            var bytes = await Task.Run(() => GenerateWavBytes(text, targetVoice, rate), ct);
+            var bytes = await Task.Run(() => GenerateWavBytes(text, targetVoice, rate, pitch), ct);
             await File.WriteAllBytesAsync(path, bytes, ct);
         }
         finally
@@ -319,6 +432,7 @@ public sealed class SherpaTtsEngine : ITtsEngine
             try { _currentWaveOut?.Stop(); _currentWaveOut?.Dispose(); _currentWaveOut = null; } catch { }
             try { _prefetchCts?.Cancel(); _prefetchCts?.Dispose(); _prefetchCts = null; } catch { }
             _prefetchedText = null;
+            _prefetchedVoice = null;
             _prefetchTask = null;
         }
         try { _currentTts?.Dispose(); _currentTts = null; } catch { }

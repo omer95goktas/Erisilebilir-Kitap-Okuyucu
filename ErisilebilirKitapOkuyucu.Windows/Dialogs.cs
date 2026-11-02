@@ -4,6 +4,7 @@ using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using ErisilebilirKitapOkuyucu.Services;
 using Microsoft.Win32;
@@ -27,7 +28,15 @@ public abstract class DialogBase : Window
         AutomationProperties.SetName(this, title);
         Content = new ScrollViewer { Content = Body, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
         Body.Children.Add(new TextBlock { Text = title, Style = (Style)Application.Current.Resources["Heading"], Focusable = true });
-        PreviewKeyDown += (_, e) => { if (e.Key == Key.Escape) { e.Handled = true; DialogResult = false; } };
+        PreviewKeyDown += (_, e) =>
+        {
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (e.Key == Key.Escape || (key == Key.F4 && (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt) || e.Key == Key.System)))
+            {
+                e.Handled = true;
+                DialogResult = false;
+            }
+        };
     }
 
     protected static Button Btn(string text, RoutedEventHandler click, bool isDefault = false, string? help = null)
@@ -103,18 +112,134 @@ public sealed class ChoiceDialog : DialogBase
     }
 }
 
+public sealed class ChangeShortcutDialog : DialogBase
+{
+    private readonly ShortcutDef _def;
+    private readonly TextBlock _statusText = new() { Margin = new Thickness(4, 12, 4, 12), FontWeight = FontWeights.Bold, FontSize = 15 };
+
+    public ChangeShortcutDialog(Window? owner, ShortcutDef def) : base(owner, $"{def.Name} - Kısayol Belirle", 560)
+    {
+        _def = def;
+        var (curKey, curMods) = ShortcutService.GetCurrent(def.Id);
+
+        Body.Children.Add(new TextBlock { Text = $"Eylem: {def.Name} ({def.Category})", FontWeight = FontWeights.Bold, Margin = new Thickness(4, 0, 4, 4) });
+        Body.Children.Add(new TextBlock { Text = def.Description, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(4, 0, 4, 12) });
+
+        var promptBox = new Border
+        {
+            Background = new SolidColorBrush(Color.FromArgb(25, 0, 102, 204)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0, 102, 204)),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(12),
+            Margin = new Thickness(4, 0, 4, 12),
+            Focusable = true
+        };
+        AutomationProperties.SetName(promptBox, $"{def.Name} için yeni kısayol tuşuna basın. Kısayolu kaldırmak için Delete, iptal için Escape tuşuna basabilirsiniz.");
+
+        var promptText = new TextBlock
+        {
+            Text = "Lütfen atamak istediğiniz yeni tuşa veya tuş kombinasyonuna basın.\nTuşa bastığınız anda yeni kısayol otomatik olarak kaydedilecek ve bu pencere kapanacaktır.\n\n• Örnek tuşlar: Ctrl + P, Boşluk, Alt + Sağ Ok, F2 vb.\n• Kısayolu kaldırmak için: Delete (Sil)\n• İptal etmek için: Esc",
+            TextWrapping = TextWrapping.Wrap
+        };
+        promptBox.Child = promptText;
+        Body.Children.Add(promptBox);
+
+        _statusText.Text = "Mevcut Kısayol: " + ShortcutService.FormatCombo(curKey, curMods);
+        AutomationProperties.SetName(_statusText, _statusText.Text);
+        Body.Children.Add(_statusText);
+
+        var btnClear = Btn("Kısayolu Kaldır (Delete)", (_, _) => Clear());
+        var btnCancel = Btn("İptal (Esc)", (_, _) => { DialogResult = false; });
+
+        Body.Children.Add(ButtonRow(btnClear, btnCancel));
+
+        PreviewKeyDown += OnPreviewKey;
+        FocusFirst(promptBox);
+
+        Loaded += (_, _) =>
+        {
+            Dispatcher.BeginInvoke(() =>
+            {
+                SystemSounds.Asterisk.Play();
+                App.Announce($"{_def.Name} için yeni kısayol tuşuna basın. İptal için Escape.", important: true);
+            }, DispatcherPriority.Input);
+        };
+    }
+
+    private void OnPreviewKey(object sender, KeyEventArgs e)
+    {
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        var mods = Keyboard.Modifiers;
+
+        if (key == Key.LeftCtrl || key == Key.RightCtrl ||
+            key == Key.LeftAlt || key == Key.RightAlt ||
+            key == Key.LeftShift || key == Key.RightShift ||
+            key == Key.LWin || key == Key.RWin ||
+            key == Key.Capital || key == Key.CapsLock ||
+            key == Key.Insert || key == Key.None)
+        {
+            return;
+        }
+
+        if (key == Key.Escape && mods == ModifierKeys.None)
+        {
+            e.Handled = true;
+            DialogResult = false;
+            return;
+        }
+
+        if (key == Key.Delete && mods == ModifierKeys.None)
+        {
+            e.Handled = true;
+            Clear();
+            return;
+        }
+
+        e.Handled = true;
+        var combo = ShortcutService.FormatCombo(key, mods);
+
+        var conflict = ShortcutService.FindConflict(_def.Id, key, mods);
+        if (conflict != null)
+        {
+            SystemSounds.Hand.Play();
+            var r = MessageBox.Show(this,
+                $"Bu kısayol ({combo}) zaten '{conflict}' eylemine atanmış.\n\nYine de '{_def.Name}' eylemine atamak istiyor musunuz?",
+                "Kısayol Çakışması", MessageBoxButton.YesNo, MessageBoxImage.Question);
+            if (r != MessageBoxResult.Yes)
+            {
+                App.Announce("Atama iptal edildi. Lütfen başka bir kısayol tuşuna basın.", important: true);
+                return;
+            }
+        }
+
+        ShortcutService.SaveShortcut(_def.Id, key, mods);
+        SystemSounds.Asterisk.Play();
+        App.Announce($"{_def.Name} kısayolu {combo} olarak kaydedildi.", important: true);
+        DialogResult = true;
+    }
+
+    private void Clear()
+    {
+        ShortcutService.SaveShortcut(_def.Id, Key.None, ModifierKeys.None);
+        SystemSounds.Asterisk.Play();
+        App.Announce($"{_def.Name} kısayolu kaldırıldı.", important: true);
+        DialogResult = true;
+    }
+}
+
 public sealed class AddBookmarkDialog : DialogBase
 {
     private readonly TextBox _note = new() { AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 100, VerticalScrollBarVisibility = ScrollBarVisibility.Auto };
     public string Note => _note.Text.Trim();
 
-    public AddBookmarkDialog(Window? owner, string location, string suggestedNote) : base(owner, "Yer İmi Ekle", 560)
+    public AddBookmarkDialog(Window? owner, string location, string suggestedNote) : base(owner, "Yer İmi ve Not / Alıntı Ekle", 560)
     {
         Body.Children.Add(new TextBlock { Text = "Konum: " + location, Margin = new Thickness(4, 0, 4, 8) });
-        var lbl = new TextBlock { Text = "Yer İmi Notu (isteğe bağlı)", Margin = new Thickness(4, 0, 4, 0) };
+        var lbl = new TextBlock { Text = "Alıntı veya Notunuz (isteğe bağlı):", Margin = new Thickness(4, 0, 4, 0) };
         Body.Children.Add(lbl);
         _note.Text = suggestedNote;
-        AutomationProperties.SetName(_note, "Yer imi notu");
+        AutomationProperties.SetName(_note, "Alıntı veya not metni");
         Body.Children.Add(_note);
 
         Body.Children.Add(ButtonRow(
@@ -130,23 +255,40 @@ public sealed class BookmarksDialog : DialogBase
     private readonly ListBox _list = new() { MaxHeight = 360, MinHeight = 120 };
     public Bookmark? GoTo { get; private set; }
 
-    public BookmarksDialog(Window? owner, BookItem book) : base(owner, "Yer İmleri", 640)
+    public BookmarksDialog(Window? owner, BookItem book) : base(owner, "Yer İmleri ve Notlar", 680)
     {
         _book = book;
-        AutomationProperties.SetName(_list, "Yer imleri listesi");
+        AutomationProperties.SetName(_list, "Yer imleri ve notlar listesi");
         _list.MouseDoubleClick += (_, _) => Go();
         _list.PreviewKeyDown += (_, e) =>
         {
             if (e.Key == Key.Enter) { e.Handled = true; Go(); }
             else if (e.Key == Key.Delete) { e.Handled = true; Remove(); }
+            else if (e.Key == Key.C && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; CopyNote(); }
         };
         Body.Children.Add(_list);
         Refresh();
         Body.Children.Add(ButtonRow(
             Btn("Git", (_, _) => Go(), true),
+            Btn("Notu Kopyala", (_, _) => CopyNote(), help: "Seçili notu veya alıntıyı panoya kopyalar (Ctrl+C)"),
             Btn("Sil", (_, _) => Remove(), help: "Seçili yer imini siler (Delete tuşu)"),
             Btn("Kapat", (_, _) => DialogResult = false)));
         Loaded += (_, _) => Dispatcher.BeginInvoke(() => { if (_list.Items.Count > 0) (_list.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem)?.Focus(); else _list.Focus(); }, DispatcherPriority.Input);
+    }
+
+    private void CopyNote()
+    {
+        if (Selected is not { } b) return;
+        var textToCopy = !string.IsNullOrWhiteSpace(b.Note) ? b.Note : b.Title;
+        try
+        {
+            Clipboard.SetText(textToCopy);
+            App.Announce("Not veya alıntı panoya kopyalandı");
+        }
+        catch (Exception ex)
+        {
+            App.Announce("Kopyalanamadı: " + ex.Message);
+        }
     }
 
     private string Describe(Bookmark b)
@@ -168,8 +310,8 @@ public sealed class BookmarksDialog : DialogBase
         }
         if (_list.Items.Count == 0)
         {
-            var empty = new ListBoxItem { Content = "Henüz yer imi yok.", IsEnabled = false };
-            AutomationProperties.SetName(empty, "Henüz yer imi yok.");
+            var empty = new ListBoxItem { Content = "Henüz yer imi veya not yok.", IsEnabled = false };
+            AutomationProperties.SetName(empty, "Henüz yer imi veya not yok.");
             _list.Items.Add(empty);
         }
         else _list.SelectedIndex = 0;
@@ -347,78 +489,182 @@ public sealed class HelpDialog : DialogBase
         Height = 460
     };
 
-    public HelpDialog(Window? owner) : base(owner, "Klavye Kısayolları ve Yardım", 760)
+    public HelpDialog(Window? owner) : base(owner, "Kullanım Kılavuzu ve Klavye Kısayolları", 800)
     {
         var html = @"<!DOCTYPE html>
 <html lang=""tr"">
 <head>
 <meta charset=""utf-8"">
 <style>
-  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 16px; line-height: 1.6; color: #111; background: #fff; padding: 16px; margin: 0; }
+  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 16px; line-height: 1.6; color: #111; background: #fff; padding: 18px; margin: 0; }
   h1 { font-size: 22px; color: #004d99; border-bottom: 2px solid #004d99; padding-bottom: 6px; margin-top: 0; }
-  h2 { font-size: 18px; color: #1a5276; margin-top: 20px; margin-bottom: 8px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  h2 { font-size: 18px; color: #1a5276; margin-top: 22px; margin-bottom: 8px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+  h3 { font-size: 16px; color: #0e3d59; margin-top: 14px; margin-bottom: 6px; }
+  .tip-box { background: #eef6ff; border-left: 5px solid #004d99; padding: 12px; margin: 12px 0; border-radius: 4px; }
+  .feature-box { background: #f4fbf4; border-left: 5px solid #2e7d32; padding: 12px; margin: 12px 0; border-radius: 4px; }
   ul { list-style-type: square; margin-top: 4px; padding-left: 24px; }
   li { margin-bottom: 6px; }
   strong { color: #000; }
+  .badge { background: #004d99; color: #fff; padding: 2px 7px; border-radius: 4px; font-size: 13px; font-weight: bold; }
 </style>
 </head>
 <body>
-<h1>Klavye Kısayolları ve Yardım</h1>
+<h1>Erişilebilir Kitap Okuyucu v2.0.0 - Kolay Kullanım Kılavuzu</h1>
 
-<h2>Kitaplık Kısayolları</h2>
+<div class=""tip-box"">
+  <strong>Hoş Geldiniz!</strong> Bu uygulama; görme engelli dostlarımızın kitapları, PDF'leri, Word belgelerini ve sesli kitapları hiçbir engelle karşılaşmadan en verimli ve bağımsız biçimde okuyup dinleyebilmesi için geliştirilmiştir. Aşağıdaki adımları okuyarak programı ve tüm yeni v2.0.0 özelliklerini kolayca keşfedebilirsiniz.
+</div>
+
+<h2>1. Kitap veya Belge Nasıl Eklenir?</h2>
+<p>Program açıldığında klavye odağı doğrudan Kitaplık listesinde yer alır:</p>
 <ul>
-  <li><strong>Ctrl + O:</strong> Kitap Ekle (PDF, TXT, EPUB, DOCX, ZIP ve ses dosyaları)</li>
+  <li><strong>Bilgisayarınızdan Dosya Eklemek İçin:</strong> Klavyeden <strong>Ctrl + O</strong> tuşuna basın. Açılan dosya seçim penceresinden PDF, Word (DOCX / DOC), Excel Tablosu (XLSX), EPUB, Markdown (MD), Düz Metin (TXT) veya sesli kitap (ZIP / MP3) dosyanızı seçip Aç deyin. Kitabınız hemen listenize eklenir.</li>
+  <li><strong>İnternetteki Bir Yazıyı Eklemek İçin:</strong> <strong>Ctrl + U</strong> tuşuna basıp haberin veya makalenin internet bağlantısını (URL) yapıştırın.</li>
+  <li><strong>Panodaki Metni Kitap Yapmak İçin:</strong> Kopyaladığınız bir metni <strong>Ctrl + Shift + V</strong> tuşuyla anında kitaplık listesine ekleyebilirsiniz.</li>
+  <li><strong>Kitabı Açmak İçin:</strong> Listede kitabın üzerine gelip <strong>Enter</strong> tuşuna basın.</li>
+  <li><strong>Kitap Silmek İçin:</strong> Seçili kitap üzerinde <strong>Delete</strong> tuşuna basıp onaylayın. (Orijinal dosyanız silinmez).</li>
+</ul>
+
+<h2>2. Belge ve Kitap Nasıl Okunur? (Metin Gezinme Standartları)</h2>
+<p>Bir kitabı açtığınızda imleç doğrudan metin alanının en başına odaklanır ve ekran okuyucunuz hazır duruma gelir:</p>
+<ul>
+  <li><strong>Sesli Okumayı Başlatmak / Duraklatmak:</strong> Klavyenizdeki <strong>Boşluk (Space)</strong> tuşuna basın! Program seçtiğiniz Türkçe sesle okumaya başlar. Bir sayfa bittiğinde hiç duraksamadan sonraki sayfaya geçer ve siz durdurana kadar kesintisiz okur. Tekrar <strong>Boşluk</strong> tuşuna basarak duraklatabilirsiniz.</li>
+  <li><strong>Hızlı Susturma (Ekran Okuyucu Refleksi):</strong> Sesli okuma devam ederken klavyedeki <strong>Ctrl</strong> tuşuna tek başına dokunup bıraktığınızda okuma anında duraklar.</li>
+  <li><strong>Kendi Ekran Okuyucunuzla (NVDA / JAWS / Narrator) Gezinme:</strong>
+    <ul>
+      <li><strong>Yukarı / Aşağı Ok:</strong> Satır satır gezinir. Sayfa sonundayken Aşağı Ok'a bastığınızda otomatik olarak sonraki sayfaya geçer ve ilk cümleyi seslendirir.</li>
+      <li><strong>Ctrl + Sol / Sağ Ok:</strong> Standart Windows kuralına uygun olarak <em>kelime kelime</em> gezinir.</li>
+      <li><strong>Ctrl + Yukarı / Aşağı Ok:</strong> Akıllı biçimlendirilmiş paragraflar arasında önceki / sonraki paragrafa atlar.</li>
+      <li><strong>PageDown / PageUp:</strong> Sonraki veya önceki sayfaya doğrudan geçiş yapar (Ctrl + PageDown / PageUp da kullanılabilir).</li>
+      <li><strong>Ctrl + Enter:</strong> İmlecin bulunduğu satırdan itibaren sürekli sesli okumayı başlatır.</li>
+      <li><strong>Enter:</strong> Yalnızca imlecin üzerinde bulunduğu mevcut satırı / cümleyi seslendirir.</li>
+    </ul>
+  </li>
+  <li><strong>Sesli Okuma Esnasında Cümle Atlamak:</strong> Okuma sürerken sonraki cümleye atlamak için <strong>Alt + Sağ Ok</strong>, önceki cümleye dönmek için <strong>Alt + Sol Ok</strong> tuşlarını kullanabilirsiniz.</li>
+</ul>
+
+<h2>3. Sesi Açıp Kısma ve Hız Ayarı</h2>
+<ul>
+  <li><strong>Ses Düzeyi:</strong> Okuma sırasında sesi artırmak için <strong>Ctrl + Shift + Sağ Ok</strong> (veya <strong>Alt + Yukarı Ok</strong>), kısmak için <strong>Ctrl + Shift + Sol Ok</strong> (veya <strong>Alt + Aşağı Ok</strong>) tuşlarına basın. Seviye yüzde olarak duyurulur.</li>
+  <li><strong>Okuma Hızı:</strong> Hızı artırmak için <strong>Ctrl + Shift + Yukarı Ok</strong>, yavaşlatmak için <strong>Ctrl + Shift + Aşağı Ok</strong> tuşlarını kullanın.</li>
+</ul>
+
+<h2>4. Uyku Zamanlayıcısı (Sleep Timer)</h2>
+<div class=""feature-box"">
+  <strong>Yeni v2.0.0 Özelliği:</strong> Gece yatarken veya dinlenirken kitap okumayı otomatik durdurmak için <strong>Ctrl + T</strong> kısayoluna basın. Açılan menüden 5, 10, 15, 30, 45 veya 60 dakika gibi hazır seçeneklerden birini seçin. Süre başladığında ve her kontrol edişinizde ekran okuyucunuz kalan süreyi net bir şekilde seslendirir. Süre dolduğunda okuma sistemi sessizce durdurur.
+</div>
+
+<h2>5. Klavye Kısayollarını Özelleştirme Motoru</h2>
+<div class=""feature-box"">
+  <strong>Yeni v2.0.0 Özelliği:</strong> Programdaki 35+ kısayolun tamamı kişisel tercihinize göre özelleştirilebilir!
+  <ul>
+    <li><strong>Kısayol Ekranına Ulaşım:</strong> <strong>Ctrl + Virgül</strong> ile Ayarlar penceresini açın. Sol ağaç menüsünden <strong>Klavye Kısayolları</strong> sekmesini seçin.</li>
+    <li><strong>Kategoriler:</strong> Kısayollar; <em>Okuma ve Gezinme Kısayolları</em>, <em>Sesli Kitap Kısayolları</em> ve <em>Genel Kısayollar</em> olarak gruplandırılmıştır.</li>
+    <li><strong>Değiştirme:</strong> İstediğiniz kısayolun üzerine gelip <strong>Kısayol Ata (F2 veya Enter)</strong> düğmesine basın; ardından klavyenizden vermek istediğiniz yeni tuşa veya tuş kombinasyonuna (örneğin Alt+S, Ctrl+Shift+P vb.) basın.</li>
+    <li><strong>Çakışma Güvenliği:</strong> Başka bir eylemde kullanılan bir tuşa basarsanız sistem çakışmayı anında sesli olarak duyurur ve karışıklığı önler.</li>
+    <li><strong>Sıfırlama:</strong> Beğenmediğinizde tek bir kısayolu veya listenin tamamını tek tıkla varsayılan fabrika ayarlarına döndürebilirsiniz.</li>
+  </ul>
+</div>
+
+<h2>6. Ayarları Yedekleme ve Geri Yükleme (JSON)</h2>
+<div class=""feature-box"">
+  <strong>Yeni v2.0.0 Özelliği:</strong> Tüm tercihlerinizi, ses motoru ayarlarınızı, görsel temalarınızı ve özelleştirdiğiniz kısayol haritanızı tek tıkla güvenceye alabilirsiniz:
+  <ul>
+    <li><strong>Yedek Almak İçin:</strong> <strong>Ctrl + Virgül</strong> ile Ayarlar'a girin, soldan <strong>Yedekleme ve Geri Yükleme</strong>'yi seçip <strong>""Ayarları Dosyaya Yedekle...""</strong> düğmesine basın. Ayarlarınız masaüstünüze veya istediğiniz yere hafif bir JSON dosyası olarak kaydedilir.</li>
+    <li><strong>Geri Yüklemek İçin:</strong> Bilgisayar değiştirdiğinizde veya sistemi sıfırladığınızda <strong>""Yedekten Ayarları Geri Yükle...""</strong> düğmesine basarak yedeğinizi seçin. Tüm ayarlarınız saniyeler içinde anında uygulanır.</li>
+  </ul>
+</div>
+
+<h2>7. Yer İmi, Not Alma ve Alıntı Yapma</h2>
+<ul>
+  <li>İmleç istediğiniz satırdayken veya seçtiğiniz bir metin üzerindeyken <strong>Ctrl + N</strong> (veya <strong>Ctrl + B</strong>) tuşuna basarak o sayfaya not ve alıntı ekleyebilirsiniz.</li>
+  <li>Tüm kayıtlı notlarınızı görmek için <strong>Ctrl + Shift + B</strong> tuşuna basın. Listedeki notların üzerinde <strong>Ctrl + C</strong> tuşuna basarak alıntıyı doğrudan panoya kopyalayabilirsiniz.</li>
+</ul>
+
+<h2>8. Sesli Kitap Oynatıcı (MP3 / ZIP Arşivleri)</h2>
+<ul>
+  <li><strong>Boşluk:</strong> Sesli kitabı oynatır veya duraklatır.</li>
+  <li><strong>Sol / Sağ Ok:</strong> Belirlenen saniye kadar geri veya ileri sarar.</li>
+  <li><strong>Ctrl + Sol / Sağ Ok:</strong> Çok bölümlü ZIP sesli kitaplarda önceki veya sonraki ayrıma / ses dosyasına geçer.</li>
+  <li><strong>Ctrl + T:</strong> Sesli kitap için uyku zamanlayıcısı kurar.</li>
+  <li><strong>Ctrl + Yukarı / Aşağı Ok:</strong> Oynatma hızını artırır veya azaltır.</li>
+  <li><strong>Shift + Yukarı / Aşağı Ok:</strong> Ses seviyesini artırır veya azaltır.</li>
+</ul>
+
+<h2>9. Excel Tablolarını Okuma ve Dinleme (XLSX)</h2>
+<p>
+  Programa eklediğiniz Excel (<strong>.xlsx</strong>) tabloları, görme engelli ve ekran okuyucu kullanıcıları için özel olarak optimize edilir:
+</p>
+<ul>
+  <li>Çok sayfalı Excel çalışma kitaplarında her sayfa <em>""=== [Çalışma Sayfası: Sayfa Adı] ===""</em> başlığıyla net biçimde ayrıştırılır.</li>
+  <li>Tablo satırları ve hücreler <em>""Satır 1: Başlık 1 | Başlık 2 | Başlık 3""</em> biçiminde düzenli sütun ayraçlarıyla ekran okuyucu imlecine sunulur. Böylece tablolar Not Defteri akıcılığında satır satır veya kesintisiz sesle kolayca incelenebilir.</li>
+</ul>
+
+<hr style=""margin:24px 0; border:0; border-top:1px solid #ccc;"" />
+
+<h2>Tüm Varsayılan Klavye Kısayolları Tablosu</h2>
+
+<h3>Kitaplık Ekranı</h3>
+<ul>
+  <li><strong>Ctrl + O:</strong> Bilgisayardan Kitap / Dosya Ekle (PDF, Word DOCX/DOC, Excel XLSX, EPUB, TXT, MD, ZIP)</li>
   <li><strong>Ctrl + U:</strong> Web Bağlantısından Makale Ekle</li>
-  <li><strong>Ctrl + Shift + V:</strong> Panodaki Metni Kitap Olarak Ekle</li>
+  <li><strong>Ctrl + Shift + V:</strong> Panodaki Metni Kitap Yap</li>
   <li><strong>Ctrl + N:</strong> Yeni Klasör Oluştur</li>
-  <li><strong>Enter:</strong> Seçili kitabı veya ayrımı aç</li>
+  <li><strong>Enter:</strong> Seçili kitabı aç</li>
   <li><strong>Delete:</strong> Seçili kitabı kitaplıktan kaldır</li>
-  <li><strong>Ctrl + Virgül:</strong> Ayarlar penceresini aç</li>
-  <li><strong>F1:</strong> Bu yardım ve kısayollar penceresini aç</li>
-  <li><strong>Esc:</strong> Önceki ekrana dön veya açık pencereyi kapat</li>
+  <li><strong>Ctrl + Virgül:</strong> Ayarlar Penceresini Aç</li>
+  <li><strong>F1:</strong> Kullanım Kılavuzu ve Kısayollar (Bu Pencere)</li>
+  <li><strong>Esc:</strong> Uygulamadan çıkış veya önceki menüye dönüş</li>
+  <li><strong>Alt + D / G / K / A / S / Y:</strong> Üst menü çubuğuna hızlı erişim (Dosya, Görünüm, Kitaplık, Araçlar, Seçenekler, Yardım)</li>
 </ul>
 
-<h2>Belge ve Kitap Okuyucu</h2>
+<h3>Belge ve Kitap Okuyucu</h3>
 <ul>
-  <li><strong>Yukarı / Aşağı Ok Tuşları:</strong> Satır satır okuma</li>
-  <li><strong>Ctrl + Yukarı Ok / Ctrl + Aşağı Ok:</strong> Önceki veya sonraki paragrafa git ve odaklan</li>
-  <li><strong>Sol / Sağ Ok Tuşları:</strong> Karakter veya kelime gezinmesi</li>
-  <li><strong>Enter:</strong> Yalnızca imlecin üzerinde bulunduğu satırı seslendir</li>
-  <li><strong>Ctrl + C:</strong> Bulunulan satırın metnini panoya kopyala</li>
-  <li><strong>Ctrl + Enter:</strong> Bulunulan satırdan itibaren sürekli sesli okumayı başlat</li>
-  <li><strong>Boşluk Tuşu:</strong> Sayfayı sesli okumayı başlat veya duraklat</li>
-  <li><strong>Ctrl + Sağ Ok / Ctrl + Sol Ok:</strong> Sonraki veya önceki sayfaya geç</li>
-  <li><strong>Alt + Sağ Ok / Alt + Sol Ok:</strong> Sonraki veya önceki parçaya / cümleye atla</li>
-  <li><strong>Ctrl + G:</strong> Sayfa numarası yazarak doğrudan sayfaya git</li>
+  <li><strong>Yukarı / Aşağı Ok:</strong> Satır satır okuma (sayfa başında / sonunda otomatik sayfa değiştirir)</li>
+  <li><strong>Ctrl + Sol / Sağ Ok:</strong> Kelime kelime gezinme</li>
+  <li><strong>Ctrl + Yukarı / Aşağı Ok:</strong> Önceki veya sonraki paragrafa geçiş</li>
+  <li><strong>PageDown / PageUp:</strong> Sonraki veya önceki sayfaya geç (veya Ctrl + PageDown / PageUp)</li>
+  <li><strong>Boşluk Tuşu:</strong> Kesintisiz sesli okumayı başlat / duraklat</li>
+  <li><strong>Ctrl Tuşu (Tek):</strong> Sesli okumayı anında duraklat / sustur</li>
+  <li><strong>Enter:</strong> Yalnızca imlecin bulunduğu mevcut satırı seslendir</li>
+  <li><strong>Ctrl + Enter:</strong> Bulunulan satırdan itibaren sürekli sesli oku</li>
+  <li><strong>Alt + Sağ / Sol Ok:</strong> Sonraki veya önceki cümleye atla</li>
+  <li><strong>Ctrl + C:</strong> Bulunulan satırı veya seçili metni panoya kopyala</li>
+  <li><strong>Ctrl + G:</strong> Sayfa numarası kutusuna odaklanarak sayfaya git</li>
   <li><strong>Ctrl + F:</strong> Belge içinde kelime / metin ara</li>
-  <li><strong>Ctrl + B:</strong> Bulunulan konuma yer imi ekle</li>
-  <li><strong>Ctrl + Shift + B:</strong> Kayıtlı yer imlerini listele</li>
-  <li><strong>Ctrl + E:</strong> Seçili sayfaları ses (WAV) dosyasına aktar</li>
-  <li><strong>Ctrl + Shift + Yukarı / Aşağı Ok:</strong> Sesli okuma hızını artır veya azalt</li>
-</ul>
-
-<h2>Sesli Kitap Oynatıcı</h2>
-<ul>
-  <li><strong>Boşluk Tuşu:</strong> Sesli kitabı oynat veya duraklat</li>
-  <li><strong>Sol / Sağ Ok Tuşları:</strong> Belirlenen saniye kadar geri veya ileri sar</li>
-  <li><strong>Ctrl + Sağ Ok / Ctrl + Sol Ok:</strong> Sonraki veya önceki ayrım (ZIP arşivleri)</li>
-  <li><strong>Ctrl + B:</strong> Dinlenen konuma yer imi ekle</li>
+  <li><strong>Ctrl + N (veya Ctrl + B):</strong> Bulunulan konuma yer imi / alıntı notu ekle</li>
+  <li><strong>Ctrl + Shift + B:</strong> Yer imleri ve notlar listesini aç</li>
   <li><strong>Ctrl + T:</strong> Uyku zamanlayıcısı kur</li>
-  <li><strong>Ctrl + Yukarı Ok / Ctrl + Aşağı Ok:</strong> Oynatma hızını artır veya azalt</li>
-  <li><strong>Shift + Yukarı Ok / Shift + Aşağı Ok:</strong> Ses düzeyini artır veya azalt</li>
+  <li><strong>Ctrl + E:</strong> Sayfaları ses (WAV) dosyasına aktar</li>
+  <li><strong>Ctrl + Shift + Yukarı / Aşağı Ok:</strong> Sesli okuma hızını artır / azalt</li>
+  <li><strong>Ctrl + Shift + Sağ / Sol Ok (veya Alt + Yukarı / Aşağı):</strong> Ses düzeyini artır / azalt</li>
+  <li><strong>Esc:</strong> Kitabı kapat ve Kitaplığa dön</li>
 </ul>
 
-<h2>Ses Motorları ve Yasal Sorumluluk Bildirimi</h2>
+<h3>Sesli Kitap Oynatıcı</h3>
+<ul>
+  <li><strong>Boşluk Tuşu:</strong> Oynat / Duraklat</li>
+  <li><strong>Sol / Sağ Ok:</strong> Geriye / İleriye sar</li>
+  <li><strong>Ctrl + Sol / Sağ Ok:</strong> Önceki / Sonraki ayrıma geç (ZIP kitaplarda)</li>
+  <li><strong>Ctrl + T:</strong> Uyku zamanlayıcısı kur</li>
+  <li><strong>Ctrl + B:</strong> Dinlenen konuma yer imi ekle</li>
+  <li><strong>Ctrl + Shift + B:</strong> Yer imleri listesini aç</li>
+  <li><strong>Ctrl + Yukarı / Aşağı Ok:</strong> Oynatma hızını artır / azalt</li>
+  <li><strong>Shift + Yukarı / Aşağı Ok:</strong> Ses düzeyini artır / azalt</li>
+  <li><strong>Esc:</strong> Oynatıcıyı kapat ve Kitaplığa dön</li>
+</ul>
+
+<h2>Ses Motorları ve Sorumluluk Bildirimi</h2>
 <p style=""font-size:14px; color:#333;"">
-  Uygulama; tamamen yerel ve internetsiz çalışan açık kaynak nöral yapay zeka sesi (Piper Fahrettin), sistem sesleri (Windows OneCore ve SAPI 5) ile çevrim içi doğal sesleri (Microsoft Emel ve isteğe bağlı kişisel API ile Google Cloud) destekler.
+  Uygulama; tamamen yerel ve internetsiz çalışan açık kaynak nöral yapay zeka sesini (Piper Fahrettin FP32), modern sistem seslerini (Windows OneCore Tolga vb.), klasik Windows seslerini (SAPI 5) ve çevrim içi doğal sesleri (Microsoft Emel, Babek & Banu [Azerbaycan] ve isteğe bağlı kişisel Google Cloud API) destekler.
 </p>
 <p style=""font-size:14px; color:#333;"">
-  <strong>Üçüncü Taraf Servisler ve API Sorumluluk Reddi:</strong> Uygulama içerisinde kullanıcı tarafından isteğe bağlı olarak girilen Google Cloud ve benzeri üçüncü taraf API anahtarları tamamen kullanıcının kendi sorumluluğundadır. İlgili servis sağlayıcıları tarafından belirlenen kotaların aşılması veya faturalandırma sebebiyle doğabilecek hiçbir maddi borç, ücret veya mali yükümlülükten uygulama geliştiricisi (Ömer Göktaş) sorumlu tutulamaz. Girilen API anahtarları hiçbir harici sunucuya iletilmez, yalnızca kullanıcının kendi bilgisayarında yerel olarak saklanır.
+  <strong>Üçüncü Taraf Servisler ve API Sorumluluk Reddi:</strong> Uygulama içerisinde isteğe bağlı olarak girilen Google Cloud ve benzeri üçüncü taraf API anahtarları tamamen kullanıcının kendi sorumluluğundadır. İlgili servis sağlayıcılarının kota aşımlarından veya faturalandırma işlemlerinden geliştirici sorumlu tutulamaz. Girilen API anahtarları hiçbir harici sunucuya iletilmez, yalnızca bilgisayarınızda yerel olarak saklanır.
 </p>
 
 <h2>Geliştirici ve İletişim</h2>
 <ul>
-  <li><strong>Uygulama:</strong> Erişilebilir Kitap Okuyucu (Windows v{Services.UpdateService.CurrentVersion})</li>
+  <li><strong>Uygulama:</strong> Erişilebilir Kitap Okuyucu (Windows v2.0.0)</li>
   <li><strong>Geliştirici:</strong> Ömer Göktaş</li>
   <li><strong>E-Posta:</strong> mail@omergoktas.net</li>
   <li><strong>Web Sitesi:</strong> https://omergoktas.net</li>

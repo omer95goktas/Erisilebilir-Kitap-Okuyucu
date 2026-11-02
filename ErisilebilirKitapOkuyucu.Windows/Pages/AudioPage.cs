@@ -39,8 +39,8 @@ public sealed class AudioPage : PageBase
         Ui.Name(_heading, book.Title);
         Ui.Name(_nowPlaying, "Şu an çalan");
         Ui.Name(_pos, "Konum");
-        Ui.Name(_speed, "Oynatma hızı");
-        Ui.Name(_vol, "Ses düzeyi");
+        Ui.Name(_speed, $"Oynatma hızı {Fmt.Speed(_speed.Value)}");
+        Ui.Name(_vol, $"Ses düzeyi %{Math.Round(_vol.Value)}");
 
         _back = Ui.Button($"{Seek} sn Geri", () => App.Audio.SeekBy(-Seek), "Sol ok");
         _play = Ui.Button("Oynat", () => App.Audio.TogglePlayPause(), "Boşluk tuşu. Medya oynat/duraklat tuşu da çalışır", "Oynat", isPrimary: true);
@@ -56,14 +56,15 @@ public sealed class AudioPage : PageBase
         _pos.ValueChanged += (_, _) => { if (!_syncing) App.Audio.SeekTo((long)(_pos.Value * 1000)); };
 
         var speedRow = new DockPanel();
-        var sl = Ui.Text("Çalma hızı:"); sl.VerticalAlignment = VerticalAlignment.Center; sl.MinWidth = 120;
+        var sl = Ui.Text("Oynatma hızı:"); sl.VerticalAlignment = VerticalAlignment.Center; sl.MinWidth = 120;
         DockPanel.SetDock(sl, Dock.Left); DockPanel.SetDock(_speedLabel, Dock.Right);
         speedRow.Children.Add(sl); speedRow.Children.Add(_speedLabel); speedRow.Children.Add(_speed);
         _speed.ValueChanged += (_, _) =>
         {
             if (_syncing) return;
             App.Audio.SetSpeed(_speed.Value);
-            _speedLabel.Text = $"{_speed.Value:0.##}x";
+            _speedLabel.Text = Fmt.Speed(_speed.Value);
+            Ui.Name(_speed, $"Oynatma hızı {Fmt.Speed(_speed.Value)}");
             var s = App.Repo.Settings; s.AudioSpeed = (float)_speed.Value; App.Repo.UpdateSettings(s);
         };
 
@@ -138,7 +139,8 @@ public sealed class AudioPage : PageBase
         var s = App.Repo.Settings;
         _syncing = true;
         _speed.Value = Math.Clamp(_resume ? App.Audio.Speed : s.AudioSpeed, 0.5, 3.0);
-        _speedLabel.Text = $"{_speed.Value:0.##}x";
+        _speedLabel.Text = Fmt.Speed(_speed.Value);
+        Ui.Name(_speed, $"Oynatma hızı {Fmt.Speed(_speed.Value)}");
         var volVal = Math.Clamp(s.AudioVolume > 0 ? s.AudioVolume : 1.0f, 0.0f, 1.0f);
         _vol.Value = Math.Round(volVal * 100);
         _volLabel.Text = $"%{Math.Round(_vol.Value)}";
@@ -314,43 +316,64 @@ public sealed class AudioPage : PageBase
 
     private void OnKey(object sender, KeyEventArgs e)
     {
-        var mods = Keyboard.Modifiers;
+        var key = e.Key == Key.System ? e.SystemKey : e.Key;
+        if (key == Key.F4 && (Keyboard.Modifiers.HasFlag(ModifierKeys.Alt) || e.Key == Key.System))
+        {
+            e.Handled = true;
+            Host.Close();
+            return;
+        }
+
         var focus = Keyboard.FocusedElement;
         var plain = !(focus is Slider || focus is ListBox || focus is ListBoxItem || Ui.IsTypingTarget(focus));
-        if (mods == ModifierKeys.None)
+
+        if (ShortcutService.Matches("Audio.TogglePlay", e) && !(focus is Button || focus is CheckBox || focus is ListBoxItem))
         {
-            if (e.Key == Key.Space && !(focus is Button || focus is CheckBox || focus is ListBoxItem)) { App.Audio.TogglePlayPause(); e.Handled = true; }
-            else if (e.Key == Key.Left && plain) { App.Audio.SeekBy(-Seek); App.Announce(Fmt.SpokenTime(App.Audio.PositionMs)); e.Handled = true; }
-            else if (e.Key == Key.Right && plain) { App.Audio.SeekBy(Seek); App.Announce(Fmt.SpokenTime(App.Audio.PositionMs)); e.Handled = true; }
+            App.Audio.TogglePlayPause(); e.Handled = true; return;
         }
-        else if (mods == ModifierKeys.Control)
+        if (ShortcutService.Matches("Audio.SeekBackward", e) && plain)
         {
-            switch (e.Key)
-            {
-                case Key.Right: ChangeChapter(1); e.Handled = true; break;
-                case Key.Left: ChangeChapter(-1); e.Handled = true; break;
-                case Key.B: AddBookmark(); e.Handled = true; break;
-                case Key.T: SleepTimer(); e.Handled = true; break;
-                case Key.Up: _speed.Value = Math.Min(3.0, _speed.Value + 0.25); App.Announce($"Hız {_speed.Value:0.##}"); e.Handled = true; break;
-                case Key.Down: _speed.Value = Math.Max(0.5, _speed.Value - 0.25); App.Announce($"Hız {_speed.Value:0.##}"); e.Handled = true; break;
-            }
+            App.Audio.SeekBy(-Seek); App.Announce(Fmt.SpokenTime(App.Audio.PositionMs)); e.Handled = true; return;
         }
-        else if (mods == ModifierKeys.Shift)
+        if (ShortcutService.Matches("Audio.SeekForward", e) && plain)
         {
-            switch (e.Key)
-            {
-                case Key.Up:
-                    _vol.Value = Math.Min(100, _vol.Value + 5);
-                    App.Announce($"Ses düzeyi %{Math.Round(_vol.Value)}");
-                    e.Handled = true;
-                    break;
-                case Key.Down:
-                    _vol.Value = Math.Max(0, _vol.Value - 5);
-                    App.Announce($"Ses düzeyi %{Math.Round(_vol.Value)}");
-                    e.Handled = true;
-                    break;
-            }
+            App.Audio.SeekBy(Seek); App.Announce(Fmt.SpokenTime(App.Audio.PositionMs)); e.Handled = true; return;
         }
-        else if (mods == (ModifierKeys.Control | ModifierKeys.Shift) && e.Key == Key.B) { ShowBookmarks(); e.Handled = true; }
+        if (ShortcutService.Matches("Audio.NextChapter", e))
+        {
+            ChangeChapter(1); e.Handled = true; return;
+        }
+        if (ShortcutService.Matches("Audio.PrevChapter", e))
+        {
+            ChangeChapter(-1); e.Handled = true; return;
+        }
+        if (ShortcutService.Matches("Audio.SleepTimer", e))
+        {
+            SleepTimer(); e.Handled = true; return;
+        }
+        if (ShortcutService.Matches("Audio.AddBookmark", e))
+        {
+            AddBookmark(); e.Handled = true; return;
+        }
+        if (ShortcutService.Matches("Audio.ShowBookmarks", e))
+        {
+            ShowBookmarks(); e.Handled = true; return;
+        }
+        if (ShortcutService.Matches("Audio.RateUp", e))
+        {
+            _speed.Value = Math.Min(3.0, Math.Round(_speed.Value + 0.25, 2)); App.Announce($"Hız {Fmt.Speed(_speed.Value)}"); e.Handled = true; return;
+        }
+        if (ShortcutService.Matches("Audio.RateDown", e))
+        {
+            _speed.Value = Math.Max(0.5, Math.Round(_speed.Value - 0.25, 2)); App.Announce($"Hız {Fmt.Speed(_speed.Value)}"); e.Handled = true; return;
+        }
+        if (ShortcutService.Matches("Audio.VolUp", e))
+        {
+            _vol.Value = Math.Min(100, _vol.Value + 5); App.Announce($"Ses düzeyi %{Math.Round(_vol.Value)}"); e.Handled = true; return;
+        }
+        if (ShortcutService.Matches("Audio.VolDown", e))
+        {
+            _vol.Value = Math.Max(0, _vol.Value - 5); App.Announce($"Ses düzeyi %{Math.Round(_vol.Value)}"); e.Handled = true; return;
+        }
     }
 }

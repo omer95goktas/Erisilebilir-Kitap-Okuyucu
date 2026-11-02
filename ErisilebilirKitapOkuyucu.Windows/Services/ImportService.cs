@@ -13,15 +13,18 @@ public record ImportResult(BookItem? Book, string? Message);
 public class ImportService
 {
     private static readonly string[] AudioExt = { ".mp3", ".m4a", ".wav", ".aac", ".ogg", ".flac", ".wma", ".opus" };
-    private static readonly string[] DocExt = { ".pdf", ".txt", ".epub", ".docx" };
+    private static readonly string[] DocExt = { ".pdf", ".txt", ".epub", ".docx", ".doc", ".xlsx", ".md", ".markdown" };
     private readonly BookRepository _repo;
     private static readonly HttpClient Http = CreateHttp();
 
     public ImportService(BookRepository repo) { _repo = repo; }
 
     public static string Filter =>
-        "Desteklenen dosyalar|*.pdf;*.txt;*.epub;*.docx;*.zip;*.mp3;*.m4a;*.wav;*.aac;*.ogg;*.flac;*.wma;*.opus|" +
-        "Belgeler (PDF, TXT, EPUB, DOCX)|*.pdf;*.txt;*.epub;*.docx|Sesli kitaplar|*.mp3;*.m4a;*.wav;*.aac;*.ogg;*.flac;*.wma;*.opus|ZIP arşivleri|*.zip|Tüm dosyalar|*.*";
+        "Desteklenen dosyalar|*.pdf;*.txt;*.epub;*.docx;*.doc;*.xlsx;*.md;*.markdown;*.zip;*.mp3;*.m4a;*.wav;*.aac;*.ogg;*.flac;*.wma;*.opus|" +
+        "Belgeler (PDF, Word, Excel, TXT, EPUB)|*.pdf;*.txt;*.epub;*.docx;*.doc;*.xlsx;*.md;*.markdown|" +
+        "Word Belgeleri (*.docx, *.doc)|*.docx;*.doc|" +
+        "Excel Tabloları (*.xlsx)|*.xlsx|" +
+        "Sesli kitaplar|*.mp3;*.m4a;*.wav;*.aac;*.ogg;*.flac;*.wma;*.opus|ZIP arşivleri|*.zip|Tüm dosyalar|*.*";
 
     private static HttpClient CreateHttp()
     {
@@ -39,8 +42,9 @@ public class ImportService
         {
             ".pdf" => BookType.PDF,
             ".epub" => BookType.EPUB,
-            ".docx" => BookType.DOCX,
-            ".txt" => BookType.TXT,
+            ".docx" or ".doc" => BookType.DOCX,
+            ".xlsx" => BookType.XLSX,
+            ".txt" or ".md" or ".markdown" => BookType.TXT,
             _ when AudioExt.Contains(ext) => BookType.AUDIO,
             _ => null
         };

@@ -3,6 +3,7 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Xml;
+using System.Xml.Linq;
 using HtmlAgilityPack;
 using UglyToad.PdfPig;
 using Windows.Graphics.Imaging;
@@ -53,8 +54,9 @@ public sealed class DocumentSession : IDisposable
                 }
                 break;
             case BookType.EPUB: _pages = Paginate(Safe(() => TextExtractor.Epub(_path), "EPUB kitabı okunurken bir hata oluştu")); break;
-            case BookType.DOCX: _pages = Paginate(Safe(() => TextExtractor.Docx(_path), "Word belgesi (DOCX) okunurken bir hata oluştu")); break;
-            default: _pages = Paginate(TextExtractor.ReflowPdfText(TextExtractor.ReadTextFile(_path))); break;
+            case BookType.DOCX: _pages = Paginate(Safe(() => TextExtractor.Word(_path), "Word belgesi okunurken bir hata oluştu")); break;
+            case BookType.XLSX: _pages = Paginate(Safe(() => TextExtractor.Xlsx(_path), "Excel tablosu (XLSX) okunurken bir hata oluştu")); break;
+            default: _pages = Paginate(TextExtractor.Clean(TextExtractor.ReadTextFile(_path))); break;
         }
         if (_pages != null) TotalPages = Math.Max(1, _pages.Count);
     }
@@ -184,9 +186,44 @@ public static class TextExtractor
     public static string Clean(string text) =>
         Regex.Replace(Regex.Replace(Regex.Replace(text.Replace("\r\n", "\n").Replace('\r', '\n'), "[ \\t]+", " "), " ?\\n ?", "\n"), "\\n{3,}", "\n\n").Trim();
 
+    public static string DeduplicateShadowText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return text;
+
+        // 1. "KelimeKelime" (bitişik harf tekrarı, min 3 harf) örn: "BiyolojiBiyoloji", "YaşamYaşam"
+        text = Regex.Replace(text, @"(\p{L}{3,})\1", "$1");
+
+        // 2. Ardışık kelime veya kelime öbeği tekrarı (en az 2 harf içeren öbekler):
+        // örn: "9. Sınıf9. Sınıf", "9. Sınıf 9. Sınıf", "Ders KitabıDers Kitabı", "TEMA TEMA"
+        text = Regex.Replace(text, @"(?i)\b([A-Za-zÇĞİÖŞÜçğıöşü0-9\.\-]*\p{L}{2,}[A-Za-zÇĞİÖŞÜçğıöşü0-9\.\-]*(?:\s+[A-Za-zÇĞİÖŞÜçğıöşü0-9\.\-]+){0,4})\s*\1\b", "$1");
+
+        // 3. Eğer satırın tamamı simetrik olarak ikiye bölünmüşse ve her iki yarı birbirinin aynısıysa (örn: "GELİŞTİRİCİ VE İLETİŞİMGELİŞTİRİCİ VE İLETİŞİM")
+        var trimmed = text.Trim();
+        if (trimmed.Length >= 6 && trimmed.Length % 2 == 0)
+        {
+            int half = trimmed.Length / 2;
+            if (trimmed.Substring(0, half).Equals(trimmed.Substring(half), StringComparison.OrdinalIgnoreCase))
+            {
+                text = trimmed.Substring(0, half);
+            }
+        }
+        else if (trimmed.Length >= 7)
+        {
+            // Arada tek boşluk varsa: "İfade İfade"
+            int half = (trimmed.Length - 1) / 2;
+            if (trimmed[half] == ' ' && trimmed.Substring(0, half).Equals(trimmed.Substring(half + 1), StringComparison.OrdinalIgnoreCase))
+            {
+                text = trimmed.Substring(0, half);
+            }
+        }
+
+        return text;
+    }
+
     /// <summary>
     /// PDF ve OCR gibi görsel satır sonu içeren metinleri doğal paragraflara dönüştürür.
     /// Satır içi kesmeleri birleştirir, kelime sonu tirelerini (- ) bağlar,
+    /// gölge ve çift katman tekrarlarını temizler,
     /// gerçek paragraf bitişlerine çift satır sonu (\r\n\r\n) ekler.
     /// </summary>
     public static string ReflowPdfText(string rawText)
@@ -195,6 +232,7 @@ public static class TextExtractor
 
         var rawLines = rawText.Replace("\r\n", "\n").Replace('\r', '\n').Split('\n');
         var filtered = new List<string>();
+        string? lastNonEmpty = null;
 
         foreach (var l in rawLines)
         {
@@ -211,7 +249,15 @@ public static class TextExtractor
             if (Regex.IsMatch(trimmed, @"^[-—]?\s*\d+\s*[-—]?$"))
                 continue;
 
-            filtered.Add(l.TrimEnd());
+            // Gölge / katman metinlerini ve ardışık çift kelimeleri temizle
+            var deduped = DeduplicateShadowText(trimmed);
+
+            // Birebir ardışık tekrarlanan satırları atla
+            if (lastNonEmpty != null && deduped.Equals(lastNonEmpty, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            lastNonEmpty = deduped;
+            filtered.Add(deduped);
         }
 
         var lines = new List<string>();
@@ -268,8 +314,9 @@ public static class TextExtractor
 
             var trimmed = line.Trim();
             bool hasIndent = line.StartsWith("   ") || line.StartsWith("\t");
+            bool isCurrentBullet = Regex.IsMatch(trimmed, @"^(?:[—–\-•*]|\d+[\.\)]|[a-zA-Z][\.\)])\s+");
 
-            if (hasIndent && currentPara.Length > 0)
+            if ((hasIndent || isCurrentBullet) && currentPara.Length > 0)
             {
                 paragraphs.Add(currentPara.ToString().Trim());
                 currentPara.Clear();
@@ -285,7 +332,9 @@ public static class TextExtractor
             bool nextIsDialogueOrBullet = (i + 1 < lines.Count) &&
                                   Regex.IsMatch(lines[i + 1].TrimStart(), @"^(?:[—–\-•*]|\d+[\.\)]|[a-zA-Z][\.\)])\s+");
 
-            if ((endsWithPunct && (isShortLine || nextIsIndented || nextIsDialogueOrBullet)) ||
+            if (nextIsDialogueOrBullet ||
+                (endsWithPunct && (isShortLine || nextIsIndented)) ||
+                (isShortLine && !trimmed.EndsWith(',') && !trimmed.EndsWith('-') && i + 1 < lines.Count && (char.IsUpper(lines[i + 1].TrimStart().FirstOrDefault()))) ||
                 (i + 1 < lines.Count && string.IsNullOrWhiteSpace(lines[i + 1])))
             {
                 paragraphs.Add(currentPara.ToString().Trim());
@@ -324,7 +373,14 @@ public static class TextExtractor
 
     public static string ReadTextFile(string path) => Decode(File.ReadAllBytes(path));
 
-    // ---------- DOCX ----------
+    // ---------- WORD (DOCX ve DOC) ----------
+    public static string Word(string path)
+    {
+        var ext = Path.GetExtension(path).ToLowerInvariant();
+        if (ext == ".doc") return Doc(path);
+        return Docx(path);
+    }
+
     public static string Docx(string path)
     {
         using var zip = ZipFile.OpenRead(path);
@@ -349,6 +405,554 @@ public static class TextExtractor
             else if (xr.NodeType == XmlNodeType.EndElement && xr.LocalName == "p") sb.Append("\n\n");
         }
         return Clean(sb.ToString());
+    }
+
+    public static string Doc(string path)
+    {
+        if (!File.Exists(path)) return "";
+        byte[] bytes;
+        try { bytes = File.ReadAllBytes(path); }
+        catch (Exception ex) { AppPaths.Log("doc read: " + ex); return ""; }
+        if (bytes.Length == 0) return "";
+
+        // 1. Dosya aslında DOCX (Zip) mi? (PK\x03\x04)
+        if (bytes.Length >= 4 && bytes[0] == 0x50 && bytes[1] == 0x4B && bytes[2] == 0x03 && bytes[3] == 0x04)
+        {
+            return Docx(path);
+        }
+
+        // 2. Dosya RTF mi? ({\rtf)
+        if (bytes.Length >= 5 && bytes[0] == (byte)'{' && bytes[1] == (byte)'\\' && bytes[2] == (byte)'r' && bytes[3] == (byte)'t' && bytes[4] == (byte)'f')
+        {
+            return ExtractRtfText(Decode(bytes));
+        }
+
+        // 3. Dosya HTML / XML olarak kaydedilmiş bir Word dosyası mı?
+        var head = Encoding.ASCII.GetString(bytes, 0, Math.Min(bytes.Length, 256)).TrimStart();
+        if (head.StartsWith("<html", StringComparison.OrdinalIgnoreCase) ||
+            head.StartsWith("<!DOCTYPE html", StringComparison.OrdinalIgnoreCase) ||
+            head.StartsWith("<?xml", StringComparison.OrdinalIgnoreCase))
+        {
+            return HtmlToText(Decode(bytes));
+        }
+
+        // 4. Standart OLE2 Compound Document Word 97-2003 (.doc)
+        if (bytes.Length >= 8 && bytes[0] == 0xD0 && bytes[1] == 0xCF && bytes[2] == 0x11 && bytes[3] == 0xE0)
+        {
+            try
+            {
+                var text = ExtractOleDoc(bytes);
+                if (!string.IsNullOrWhiteSpace(text)) return Clean(text);
+            }
+            catch (Exception ex)
+            {
+                AppPaths.Log("ole doc extract: " + ex);
+            }
+        }
+
+        // 5. Fallback: Düz metin / karakter dizisi tarama
+        return Clean(FallbackExtractText(bytes));
+    }
+
+    public static string ExtractRtfText(string rtf)
+    {
+        if (string.IsNullOrWhiteSpace(rtf)) return "";
+        try
+        {
+            // Meta veri bloklarını temizle (font, renk tablosu, başlık bilgisi vb.)
+            rtf = Regex.Replace(rtf, @"\{\\\*(?:fonttbl|colortbl|stylesheet|info|pict)[^}]*\}", "", RegexOptions.Singleline);
+            rtf = Regex.Replace(rtf, @"\{(?:fonttbl|colortbl|stylesheet|info|pict)[^}]*\}", "", RegexOptions.Singleline);
+
+            // Unicode karakterler: \uNNNN?
+            rtf = Regex.Replace(rtf, @"\\u([0-9]{1,5})\??", m =>
+            {
+                if (int.TryParse(m.Groups[1].Value, out int code))
+                    return ((char)code).ToString();
+                return "";
+            });
+
+            // Türkçe karakter hex kodları: \'e7 -> ç vb.
+            rtf = Regex.Replace(rtf, @"\\'([0-9a-fA-F]{2})", m =>
+            {
+                try
+                {
+                    byte b = Convert.ToByte(m.Groups[1].Value, 16);
+                    return Encoding.GetEncoding(1254).GetString(new[] { b });
+                }
+                catch { return ""; }
+            });
+
+            // Satır ve paragraf sonları
+            rtf = rtf.Replace("\\par", "\n\n").Replace("\\line", "\n").Replace("\\tab", "    ");
+            // Kalan kontrol kelimelerini temizle
+            rtf = Regex.Replace(rtf, @"\\[a-zA-Z]+-?[0-9]*\s?", "");
+            // Küme parantezleri
+            rtf = rtf.Replace("{", "").Replace("}", "");
+            return Clean(rtf);
+        }
+        catch { return Clean(rtf); }
+    }
+
+    private static string ExtractOleDoc(byte[] rawBytes)
+    {
+        var ole = new OleReader(rawBytes);
+        var wordDoc = ole.GetStream("WordDocument");
+        if (wordDoc == null || wordDoc.Length < 32)
+            return FallbackExtractText(rawBytes);
+
+        ushort magic = BitConverter.ToUInt16(wordDoc, 0);
+        if (magic != 0xA5EC)
+            return FallbackExtractText(wordDoc);
+
+        ushort flags = BitConverter.ToUInt16(wordDoc, 0x000A);
+        bool whichTable = (flags & 0x0200) != 0;
+        var tableBytes = ole.GetStream(whichTable ? "1Table" : "0Table") ?? ole.GetStream("0Table") ?? ole.GetStream("1Table");
+
+        if (tableBytes != null && wordDoc.Length >= 0x01AA)
+        {
+            uint fcClx = BitConverter.ToUInt32(wordDoc, 0x01A2);
+            uint lcbClx = BitConverter.ToUInt32(wordDoc, 0x01A6);
+
+            if (lcbClx > 0 && fcClx + lcbClx <= tableBytes.Length)
+            {
+                var text = ParseClx(tableBytes, (int)fcClx, (int)lcbClx, wordDoc);
+                if (!string.IsNullOrWhiteSpace(text)) return CleanWordDocText(text);
+            }
+        }
+
+        return CleanWordDocText(FallbackExtractText(wordDoc));
+    }
+
+    private static string ParseClx(byte[] table, int fcClx, int lcbClx, byte[] wordDoc)
+    {
+        int pos = fcClx;
+        int end = fcClx + lcbClx;
+        while (pos < end && table[pos] == 0x01)
+        {
+            if (pos + 3 > end) break;
+            short cb = BitConverter.ToInt16(table, pos + 1);
+            pos += 3 + cb;
+        }
+
+        if (pos < end && table[pos] == 0x02)
+        {
+            pos++;
+            if (pos + 4 > end) return "";
+            int lcbPlcfpcd = BitConverter.ToInt32(table, pos);
+            pos += 4;
+            if (lcbPlcfpcd <= 4) return "";
+
+            int n = (lcbPlcfpcd - 4) / 12;
+            int cpOffset = pos;
+            int pcdOffset = pos + (n + 1) * 4;
+
+            if (pcdOffset + n * 8 > end) return "";
+
+            var sb = new StringBuilder();
+            for (int i = 0; i < n; i++)
+            {
+                int cpStart = BitConverter.ToInt32(table, cpOffset + i * 4);
+                int cpEnd = BitConverter.ToInt32(table, cpOffset + (i + 1) * 4);
+                int charCount = cpEnd - cpStart;
+                if (charCount <= 0) continue;
+
+                uint fc = BitConverter.ToUInt32(table, pcdOffset + i * 8 + 2);
+                bool isAnsi = (fc & 0x40000000u) != 0;
+                uint actualFc = fc & ~0x40000000u;
+
+                if (isAnsi)
+                {
+                    int byteOffset = (int)(actualFc / 2);
+                    if (byteOffset + charCount <= wordDoc.Length)
+                    {
+                        sb.Append(Encoding.GetEncoding(1254).GetString(wordDoc, byteOffset, charCount));
+                    }
+                }
+                else
+                {
+                    int byteOffset = (int)actualFc;
+                    if (byteOffset + charCount * 2 <= wordDoc.Length)
+                    {
+                        sb.Append(Encoding.Unicode.GetString(wordDoc, byteOffset, charCount * 2));
+                    }
+                }
+            }
+            return sb.ToString();
+        }
+        return "";
+    }
+
+    private static string CleanWordDocText(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return "";
+        var sb = new StringBuilder(text.Length);
+        for (int i = 0; i < text.Length; i++)
+        {
+            char c = text[i];
+            if (c == '\r')
+            {
+                sb.Append("\r\n\r\n");
+            }
+            else if (c == '\x07') // Word hücre / satır sonu
+            {
+                sb.Append(" | ");
+            }
+            else if (c == '\x0B') // Shift + Enter
+            {
+                sb.Append("\r\n");
+            }
+            else if (c == '\x0C') // Sayfa sonu
+            {
+                sb.Append("\r\n\r\n");
+            }
+            else if (c == '\t')
+            {
+                sb.Append("    ");
+            }
+            else if (c >= 0x20 || c == '\n')
+            {
+                sb.Append(c);
+            }
+        }
+        return Clean(sb.ToString());
+    }
+
+    public static string FallbackExtractText(byte[] bytes)
+    {
+        if (bytes.Length == 0) return "";
+        var sb = new StringBuilder();
+
+        // 1. Önce UTF-16LE karakter dizilerini tara (Word belgelerinde standart)
+        int uCount = 0;
+        int uStart = -1;
+        for (int i = 0; i + 1 < bytes.Length; i += 2)
+        {
+            char c = (char)(bytes[i] | (bytes[i + 1] << 8));
+            bool isPrintable = (c >= ' ' && c <= '~') ||
+                               "çğıöşüÇĞİÖŞÜâîûÂÎÛ".Contains(c) ||
+                               c == '\r' || c == '\n' || c == '\t' ||
+                               (c >= 0x00A0 && c <= 0x024F);
+            if (isPrintable)
+            {
+                if (uStart == -1) uStart = i;
+                uCount++;
+            }
+            else
+            {
+                if (uCount >= 4)
+                {
+                    sb.Append(Encoding.Unicode.GetString(bytes, uStart, uCount * 2)).Append(' ');
+                }
+                uStart = -1;
+                uCount = 0;
+            }
+        }
+        if (uCount >= 4)
+        {
+            sb.Append(Encoding.Unicode.GetString(bytes, uStart, uCount * 2));
+        }
+
+        var result = CleanWordDocText(sb.ToString());
+        if (result.Length >= 20) return result;
+
+        // 2. Yeterli UTF-16 çıkmazsa ANSI Windows-1254 bloklarını tara
+        sb.Clear();
+        int aCount = 0;
+        int aStart = -1;
+        for (int i = 0; i < bytes.Length; i++)
+        {
+            byte b = bytes[i];
+            bool isPrintable = (b >= 32 && b <= 126) || b == 13 || b == 10 || b == 9 ||
+                               b == 0xE7 || b == 0xC7 || b == 0xF0 || b == 0xD0 ||
+                               b == 0xFD || b == 0xDD || b == 0xF6 || b == 0xD6 ||
+                               b == 0xFE || b == 0xDE || b == 0xFC || b == 0xDC;
+            if (isPrintable)
+            {
+                if (aStart == -1) aStart = i;
+                aCount++;
+            }
+            else
+            {
+                if (aCount >= 4)
+                {
+                    sb.Append(Encoding.GetEncoding(1254).GetString(bytes, aStart, aCount)).Append(' ');
+                }
+                aStart = -1;
+                aCount = 0;
+            }
+        }
+        if (aCount >= 4)
+        {
+            sb.Append(Encoding.GetEncoding(1254).GetString(bytes, aStart, aCount));
+        }
+
+        return CleanWordDocText(sb.ToString());
+    }
+
+    // ---------- EXCEL (XLSX) ----------
+    public static string Xlsx(string path)
+    {
+        using var zip = ZipFile.OpenRead(path);
+
+        // 1. Shared Strings tablosunu oku (xl/sharedStrings.xml)
+        var sharedStrings = new List<string>();
+        var sstEntry = zip.GetEntry("xl/sharedStrings.xml")
+            ?? zip.Entries.FirstOrDefault(e => e.FullName.Equals("xl/sharedStrings.xml", StringComparison.OrdinalIgnoreCase));
+        if (sstEntry != null)
+        {
+            using var s = sstEntry.Open();
+            var doc = XDocument.Load(s);
+            foreach (var si in doc.Descendants().Where(e => e.Name.LocalName == "si"))
+            {
+                var tNodes = si.Descendants().Where(e => e.Name.LocalName == "t");
+                var text = string.Concat(tNodes.Select(t => t.Value));
+                sharedStrings.Add(text);
+            }
+        }
+
+        // 2. Çalışma Sayfalarını ve adlarını tespit et (xl/workbook.xml ve .rels)
+        var sheetEntries = new List<(string name, string entryPath)>();
+        var wbEntry = zip.GetEntry("xl/workbook.xml")
+            ?? zip.Entries.FirstOrDefault(e => e.FullName.Equals("xl/workbook.xml", StringComparison.OrdinalIgnoreCase));
+        var relsEntry = zip.GetEntry("xl/_rels/workbook.xml.rels")
+            ?? zip.Entries.FirstOrDefault(e => e.FullName.Equals("xl/_rels/workbook.xml.rels", StringComparison.OrdinalIgnoreCase));
+
+        var rIdToTarget = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (relsEntry != null)
+        {
+            using var rs = relsEntry.Open();
+            var relDoc = XDocument.Load(rs);
+            foreach (var rel in relDoc.Descendants().Where(e => e.Name.LocalName == "Relationship"))
+            {
+                var id = (string?)rel.Attribute("Id");
+                var target = (string?)rel.Attribute("Target");
+                if (!string.IsNullOrEmpty(id) && !string.IsNullOrEmpty(target))
+                {
+                    var norm = target.Replace('\\', '/').TrimStart('/');
+                    if (!norm.StartsWith("xl/")) norm = "xl/" + norm;
+                    rIdToTarget[id] = norm;
+                }
+            }
+        }
+
+        if (wbEntry != null)
+        {
+            using var ws = wbEntry.Open();
+            var wbDoc = XDocument.Load(ws);
+            foreach (var sheet in wbDoc.Descendants().Where(e => e.Name.LocalName == "sheet"))
+            {
+                var name = (string?)sheet.Attribute("name") ?? "Sayfa";
+                var rId = (string?)sheet.Attributes().FirstOrDefault(a => a.Name.LocalName == "id");
+                if (rId != null && rIdToTarget.TryGetValue(rId, out var targetPath))
+                {
+                    sheetEntries.Add((name, targetPath));
+                }
+            }
+        }
+
+        // Eğer workbook.xml okunamadıysa doğrudan xl/worksheets/ klasöründeki sayfaları al
+        if (sheetEntries.Count == 0)
+        {
+            var wsEntries = zip.Entries.Where(e => Regex.IsMatch(e.FullName, @"xl/worksheets/sheet\d+\.xml", RegexOptions.IgnoreCase)).ToList();
+            int idx = 1;
+            foreach (var we in wsEntries)
+            {
+                sheetEntries.Add(($"Sayfa {idx++}", we.FullName));
+            }
+        }
+
+        var sb = new StringBuilder();
+        foreach (var (sheetName, entryPath) in sheetEntries)
+        {
+            var sheetEntry = zip.GetEntry(entryPath)
+                ?? zip.Entries.FirstOrDefault(e => e.FullName.Equals(entryPath, StringComparison.OrdinalIgnoreCase));
+            if (sheetEntry == null) continue;
+
+            sb.AppendLine($"=== [Çalışma Sayfası: {sheetName}] ===");
+            sb.AppendLine();
+
+            using var ss = sheetEntry.Open();
+            var sheetDoc = XDocument.Load(ss);
+
+            foreach (var row in sheetDoc.Descendants().Where(e => e.Name.LocalName == "row"))
+            {
+                var rowIndex = (string?)row.Attribute("r");
+                var rowCells = new List<string>();
+
+                foreach (var c in row.Elements().Where(e => e.Name.LocalName == "c"))
+                {
+                    var cellType = (string?)c.Attribute("t");
+                    string? val = null;
+
+                    if (cellType == "s")
+                    {
+                        var vElem = c.Elements().FirstOrDefault(e => e.Name.LocalName == "v");
+                        if (vElem != null && int.TryParse(vElem.Value.Trim(), out int sstIdx) && sstIdx >= 0 && sstIdx < sharedStrings.Count)
+                        {
+                            val = sharedStrings[sstIdx];
+                        }
+                    }
+                    else if (cellType == "inlineStr")
+                    {
+                        var tElem = c.Descendants().FirstOrDefault(e => e.Name.LocalName == "t");
+                        val = tElem?.Value.Trim();
+                    }
+                    else if (cellType == "b")
+                    {
+                        var vElem = c.Elements().FirstOrDefault(e => e.Name.LocalName == "v");
+                        val = vElem?.Value.Trim() == "1" ? "DOĞRU" : "YANLIŞ";
+                    }
+                    else
+                    {
+                        var vElem = c.Elements().FirstOrDefault(e => e.Name.LocalName == "v");
+                        val = vElem?.Value.Trim();
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(val))
+                    {
+                        rowCells.Add(val);
+                    }
+                }
+
+                if (rowCells.Count > 0)
+                {
+                    var rowText = string.Join(" | ", rowCells);
+                    if (!string.IsNullOrWhiteSpace(rowText))
+                    {
+                        if (!string.IsNullOrEmpty(rowIndex))
+                            sb.AppendLine($"Satır {rowIndex}: {rowText}");
+                        else
+                            sb.AppendLine(rowText);
+                    }
+                }
+            }
+
+            sb.AppendLine();
+        }
+
+        return Clean(sb.ToString());
+    }
+
+    /// <summary>Saf yönetilen (pure managed) OLE2 Compound File Binary Format okuyucusu.</summary>
+    private class OleReader
+    {
+        private readonly byte[] _bytes;
+        private readonly int _sectorSize;
+        private readonly List<int> _fat = new();
+        private readonly List<int> _miniFat = new();
+        private readonly Dictionary<string, (int startSect, long size)> _entries = new(StringComparer.OrdinalIgnoreCase);
+        private byte[]? _miniStreamBytes;
+
+        public OleReader(byte[] bytes)
+        {
+            _bytes = bytes;
+            if (bytes.Length < 512) return;
+
+            int uSectorShift = BitConverter.ToUInt16(bytes, 30);
+            _sectorSize = 1 << (uSectorShift > 0 && uSectorShift < 16 ? uSectorShift : 9);
+
+            int numFatSectors = BitConverter.ToInt32(bytes, 44);
+            int sectDirStart = BitConverter.ToInt32(bytes, 48);
+            int sectMiniFatStart = BitConverter.ToInt32(bytes, 60);
+            int numMiniFatSectors = BitConverter.ToInt32(bytes, 64);
+            int sectDifStart = BitConverter.ToInt32(bytes, 68);
+            int numDifSectors = BitConverter.ToInt32(bytes, 72);
+
+            // 1. DIFAT
+            var fatSectors = new List<int>();
+            for (int i = 0; i < Math.Min(numFatSectors, 109); i++)
+            {
+                int sect = BitConverter.ToInt32(bytes, 76 + i * 4);
+                if (sect >= 0) fatSectors.Add(sect);
+            }
+            if (numDifSectors > 0 && sectDifStart >= 0)
+            {
+                int curDif = sectDifStart;
+                int difCount = 0;
+                while (curDif >= 0 && difCount++ < numDifSectors && fatSectors.Count < numFatSectors)
+                {
+                    int offset = (curDif + 1) * _sectorSize;
+                    if (offset + _sectorSize > bytes.Length) break;
+                    int intsInDif = _sectorSize / 4 - 1;
+                    for (int i = 0; i < intsInDif && fatSectors.Count < numFatSectors; i++)
+                    {
+                        int s = BitConverter.ToInt32(bytes, offset + i * 4);
+                        if (s >= 0) fatSectors.Add(s);
+                    }
+                    curDif = BitConverter.ToInt32(bytes, offset + intsInDif * 4);
+                }
+            }
+
+            // 2. FAT
+            int intsPerSector = _sectorSize / 4;
+            foreach (var fatSect in fatSectors)
+            {
+                int offset = (fatSect + 1) * _sectorSize;
+                for (int i = 0; i < intsPerSector && offset + (i + 1) * 4 <= bytes.Length; i++)
+                {
+                    _fat.Add(BitConverter.ToInt32(bytes, offset + i * 4));
+                }
+            }
+
+            // 3. Mini FAT
+            if (numMiniFatSectors > 0 && sectMiniFatStart >= 0)
+            {
+                var mfBytes = ReadChain(sectMiniFatStart, _fat, _sectorSize, numMiniFatSectors * _sectorSize);
+                for (int i = 0; i + 4 <= mfBytes.Length; i += 4)
+                {
+                    _miniFat.Add(BitConverter.ToInt32(mfBytes, i));
+                }
+            }
+
+            // 4. Dizin Akışı
+            var dirBytes = ReadChain(sectDirStart, _fat, _sectorSize, -1);
+            int dirEntrySize = 128;
+            for (int i = 0; i + dirEntrySize <= dirBytes.Length; i += dirEntrySize)
+            {
+                int nameLen = BitConverter.ToUInt16(dirBytes, i + 64);
+                if (nameLen <= 2) continue;
+                string name = Encoding.Unicode.GetString(dirBytes, i, Math.Min(nameLen - 2, 64));
+                int startSect = BitConverter.ToInt32(dirBytes, i + 116);
+                long size = BitConverter.ToUInt32(dirBytes, i + 120);
+                _entries[name] = (startSect, size);
+
+                // Kök girdi (Root Entry) Mini Stream'i tutar
+                if (i == 0 && size > 0 && startSect >= 0)
+                {
+                    _miniStreamBytes = ReadChain(startSect, _fat, _sectorSize, (int)size);
+                }
+            }
+        }
+
+        public byte[]? GetStream(string name)
+        {
+            if (!_entries.TryGetValue(name, out var entry)) return null;
+            if (entry.size < 4096 && _miniStreamBytes != null && _miniFat.Count > 0)
+            {
+                return ReadChain(entry.startSect, _miniFat, 64, (int)entry.size, _miniStreamBytes);
+            }
+            return ReadChain(entry.startSect, _fat, _sectorSize, (int)entry.size, _bytes);
+        }
+
+        private byte[] ReadChain(int startSect, List<int> fat, int secSize, int maxSize, byte[]? src = null)
+        {
+            src ??= _bytes;
+            using var ms = new MemoryStream();
+            int cur = startSect;
+            int visited = 0;
+            while (cur >= 0 && cur < fat.Count && cur != -2 && visited++ < 100000)
+            {
+                int offset = src == _bytes ? (cur + 1) * secSize : cur * secSize;
+                if (offset >= src.Length) break;
+                int count = Math.Min(secSize, src.Length - offset);
+                ms.Write(src, offset, count);
+                if (maxSize > 0 && ms.Length >= maxSize) break;
+                cur = fat[cur];
+            }
+            var res = ms.ToArray();
+            if (maxSize > 0 && res.Length > maxSize) Array.Resize(ref res, maxSize);
+            return res;
+        }
     }
 
     // ---------- EPUB ----------

@@ -1,4 +1,5 @@
 using System.IO;
+using System.Text;
 using System.Text.Json;
 
 namespace ErisilebilirKitapOkuyucu.Services;
@@ -200,6 +201,22 @@ public class BookRepository
         try { File.WriteAllText(_settingsFile, JsonSerializer.Serialize(s, Json)); }
         catch (Exception e) { AppPaths.Log("settings save: " + e); }
         SettingsChanged?.Invoke();
+    }
+
+    public void ExportSettings(string path)
+    {
+        var json = JsonSerializer.Serialize(Settings, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(path, json, Encoding.UTF8);
+    }
+
+    public bool ImportSettings(string path)
+    {
+        if (!File.Exists(path)) return false;
+        var json = File.ReadAllText(path, Encoding.UTF8);
+        var imported = JsonSerializer.Deserialize<AppSettings>(json, Json);
+        if (imported == null) return false;
+        UpdateSettings(imported);
+        return true;
     }
 
     public bool CreateFolder(string name)

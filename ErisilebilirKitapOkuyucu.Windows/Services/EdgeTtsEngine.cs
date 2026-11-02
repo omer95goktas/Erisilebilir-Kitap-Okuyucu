@@ -19,7 +19,9 @@ public sealed class EdgeTtsEngine : ITtsEngine
 
     private static readonly IReadOnlyList<VoiceDescriptor> _voices = new List<VoiceDescriptor>
     {
-        new("tr-TR-EmelNeural", "Microsoft Emel Doğal (Kadın - Çevrim İçi)", "tr-TR", "edge")
+        new("tr-TR-EmelNeural", "Microsoft Emel Doğal (Kadın - Çevrim İçi)", "tr-TR", "edge"),
+        new("az-AZ-BabekNeural", "Microsoft Babek Doğal (Erkek - Azerbaycan)", "az-AZ", "edge"),
+        new("az-AZ-BanuNeural", "Microsoft Banu Doğal (Kadın - Azerbaycan)", "az-AZ", "edge")
     };
 
     private const long WinEpoch = 11644473600;
@@ -37,6 +39,7 @@ public sealed class EdgeTtsEngine : ITtsEngine
     private readonly SemaphoreSlim _wsLock = new(1, 1);
 
     private string? _prefetchedText;
+    private string? _prefetchedVoice;
     private Task<byte[]>? _prefetchTask;
     private CancellationTokenSource? _prefetchCts;
 
@@ -73,11 +76,11 @@ public sealed class EdgeTtsEngine : ITtsEngine
     {
         if (string.IsNullOrWhiteSpace(text)) return Task.CompletedTask;
 
-        string selectedVoice = "tr-TR-EmelNeural";
+        string selectedVoice = !string.IsNullOrWhiteSpace(voiceId) ? voiceId : "tr-TR-EmelNeural";
 
         lock (_lock)
         {
-            if (_prefetchedText == text && _prefetchTask != null && !_prefetchTask.IsFaulted)
+            if (_prefetchedText == text && _prefetchedVoice == selectedVoice && _prefetchTask != null && !_prefetchTask.IsFaulted)
             {
                 return Task.CompletedTask;
             }
@@ -85,6 +88,7 @@ public sealed class EdgeTtsEngine : ITtsEngine
             try { _prefetchCts?.Cancel(); _prefetchCts?.Dispose(); } catch { }
             _prefetchCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             _prefetchedText = text;
+            _prefetchedVoice = selectedVoice;
             _prefetchTask = Task.Run(() => SynthesizeMp3Async(text, selectedVoice, rate, pitch, _prefetchCts.Token));
         }
 
@@ -525,9 +529,11 @@ public sealed class EdgeTtsEngine : ITtsEngine
         }
     }
 
-    public async Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct)
+    public Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct) => SpeakAsync(text, voiceId, rate, pitch, 1.0f, ct);
+
+    public async Task SpeakAsync(string text, string? voiceId, float rate, float pitch, float volume, CancellationToken ct)
     {
-        string selectedVoice = "tr-TR-EmelNeural";
+        string selectedVoice = !string.IsNullOrWhiteSpace(voiceId) ? voiceId : "tr-TR-EmelNeural";
 
         try
         {
@@ -536,10 +542,11 @@ public sealed class EdgeTtsEngine : ITtsEngine
 
             lock (_lock)
             {
-                if (_prefetchedText == text && _prefetchTask != null)
+                if (_prefetchedText == text && _prefetchedVoice == selectedVoice && _prefetchTask != null)
                 {
                     existingTask = _prefetchTask;
                     _prefetchedText = null;
+                    _prefetchedVoice = null;
                     _prefetchTask = null;
                 }
             }
@@ -583,6 +590,7 @@ public sealed class EdgeTtsEngine : ITtsEngine
                 tcs.TrySetCanceled();
             });
 
+            waveOut.Volume = Math.Clamp(volume, 0.0f, 1.0f);
             waveOut.Init(mp3Reader);
             waveOut.Play();
 
@@ -602,7 +610,7 @@ public sealed class EdgeTtsEngine : ITtsEngine
 
     public async Task SynthesizeToWavAsync(string text, string? voiceId, float rate, float pitch, string path, CancellationToken ct)
     {
-        string selectedVoice = "tr-TR-EmelNeural";
+        string selectedVoice = !string.IsNullOrWhiteSpace(voiceId) ? voiceId : "tr-TR-EmelNeural";
 
         byte[] mp3Data = await SynthesizeMp3Async(text, selectedVoice, rate, pitch, ct);
         if (mp3Data.Length == 0)
@@ -624,6 +632,7 @@ public sealed class EdgeTtsEngine : ITtsEngine
             try { _currentWaveOut?.Stop(); _currentWaveOut?.Dispose(); _currentWaveOut = null; } catch { }
             try { _prefetchCts?.Cancel(); _prefetchCts?.Dispose(); _prefetchCts = null; } catch { }
             _prefetchedText = null;
+            _prefetchedVoice = null;
             _prefetchTask = null;
         }
         try { _cachedWs?.Dispose(); } catch { }
