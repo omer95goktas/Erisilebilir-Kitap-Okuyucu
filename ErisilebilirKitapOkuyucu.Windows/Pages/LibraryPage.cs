@@ -555,6 +555,19 @@ public sealed class LibraryPage : PageBase
         catch (Exception ex) { App.Announce("Bağlantı açılamadı: " + ex.Message, true); }
     }
 
+    public override void OnShown()
+    {
+        App.Repo.LibraryChanged += OnLibraryChanged;
+        Refresh(null);
+        FocusBookItem();
+    }
+
+    public override void OnHidden() => App.Repo.LibraryChanged -= OnLibraryChanged;
+
+    public override bool HandleBack() => false;
+
+    private void OnLibraryChanged() => Dispatcher.BeginInvoke(() => Refresh(null));
+
     public void FocusBookItem()
     {
         Dispatcher.BeginInvoke(() =>

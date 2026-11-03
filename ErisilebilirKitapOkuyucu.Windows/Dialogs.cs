@@ -731,7 +731,7 @@ public sealed class HelpDialog : DialogBase
 </style>
 </head>
 <body>
-<h1>Erişilebilir Kitap Okuyucu v2.0.0 - Kolay Kullanım Kılavuzu</h1>
+<h1>Erişilebilir Kitap Okuyucu v2.0.2 - Kolay Kullanım Kılavuzu</h1>
 
 <div class=""tip-box"">
   <strong>Hoş Geldiniz!</strong> Bu uygulama; görme engelli dostlarımızın kitapları, PDF'leri, Word belgelerini ve sesli kitapları hiçbir engelle karşılaşmadan en verimli ve bağımsız biçimde okuyup dinleyebilmesi için geliştirilmiştir. Aşağıdaki adımları okuyarak programı ve tüm yeni v2.0.0 özelliklerini kolayca keşfedebilirsiniz.
@@ -797,7 +797,16 @@ public sealed class HelpDialog : DialogBase
   </ul>
 </div>
 
-<h2>7. Yer İmi, Not Alma ve Alıntı Yapma</h2>
+<h2>7. Yer İmleri Yöneticisi & Dışa/İçe Aktarma (Yeni v2.0.2)</h2>
+<div class=""feature-box"">
+  <strong>Yeni Özellik:</strong> Kütüphanenizdeki kitapların yer imlerini merkezi olarak yönetebilir, temiz metin (.txt) olarak dışa aktarabilir ve paylaşabilirsiniz!
+  <ul>
+    <li><strong>Açılış:</strong> Kütüphanede <strong>Ctrl + Shift + Y</strong> tuşuna basın veya <strong>Araçlar &gt; Yer İmleri Yöneticisi...</strong> menüsünü açın. Okuyucu içindeyken ise yer imleri penceresindeki <em>Dışa Aktar</em> veya <em>İçe Aktar</em> düğmelerini kullanabilirsiniz.</li>
+    <li><strong>TXT Olarak Dışa Aktarma:</strong> Seçtiğiniz kitaptaki tüm yer imlerini, işaretlediğiniz metin satırlarını, sayfa numaralarını ve notlarınızı ekran okuyucular için tertemiz biçimlendirilmiş bir <strong>.txt</strong> dosyası olarak kaydedebilirsiniz.</li>
+    <li><strong>Arkadaştan / Yedekten İçe Aktarma:</strong> Başka bir kullanıcının veya arkadaşınızın size ilettiği yer imi TXT dosyasını seçtiğiniz kitaba tek tıkla yükleyebilirsiniz. Akıllı mükerrer kontrolü sayesinde daha önce eklenmiş kayıtlar yinelenmez.</li>
+    <li><strong>Doğrudan Kitaba Gitme:</strong> Listedeki herhangi bir yer imine tıklayıp Enter'a bastığınızda kitap doğrudan o sayfadan veya süreden açılır.</li>
+  </ul>
+</div>
 <ul>
   <li>İmleç istediğiniz satırdayken veya seçtiğiniz bir metin üzerindeyken <strong>Ctrl + N</strong> (veya <strong>Ctrl + B</strong>) tuşuna basarak o sayfaya not ve alıntı ekleyebilirsiniz.</li>
   <li>Tüm kayıtlı notlarınızı görmek için <strong>Ctrl + Shift + B</strong> tuşuna basın. Listedeki notların üzerinde <strong>Ctrl + C</strong> tuşuna basarak alıntıyı doğrudan panoya kopyalayabilirsiniz.</li>
@@ -806,7 +815,7 @@ public sealed class HelpDialog : DialogBase
 <h2>8. Sesli Kitap Oynatıcı (MP3 / ZIP Arşivleri)</h2>
 <ul>
   <li><strong>Boşluk:</strong> Sesli kitabı oynatır veya duraklatır.</li>
-  <li><strong>Sol / Sağ Ok:</strong> Belirlenen saniye kadar geri veya ileri sarar.</li>
+  <li><strong>Sol / Sağ Ok:</strong> Belirlenen saniye kadar geri veya ileri sarar. <em>(Yeni: Ayrımın başına gelindiğinde sol ok otomatik olarak önceki ayrımın son kısmına geçerek kesintisiz geriye sarar!)</em></li>
   <li><strong>Ctrl + Sol / Sağ Ok:</strong> Çok bölümlü ZIP sesli kitaplarda önceki veya sonraki ayrıma / ses dosyasına geçer.</li>
   <li><strong>Ctrl + T:</strong> Sesli kitap için uyku zamanlayıcısı kurar.</li>
   <li><strong>Ctrl + Yukarı / Aşağı Ok:</strong> Oynatma hızını artırır veya azaltır.</li>
@@ -834,6 +843,7 @@ public sealed class HelpDialog : DialogBase
   <li><strong>Ctrl + N:</strong> Yeni Klasör Oluştur</li>
   <li><strong>Enter:</strong> Seçili kitabı aç</li>
   <li><strong>Delete:</strong> Seçili kitabı kitaplıktan kaldır</li>
+  <li><strong>Ctrl + Shift + Y:</strong> Yer İmleri Yöneticisi (Tüm Kitaplar & Dışa/İçe Aktarma)</li>
   <li><strong>Ctrl + Virgül:</strong> Ayarlar Penceresini Aç</li>
   <li><strong>F1:</strong> Kullanım Kılavuzu ve Kısayollar (Bu Pencere)</li>
   <li><strong>Esc:</strong> Uygulamadan çıkış veya önceki menüye dönüş</li>

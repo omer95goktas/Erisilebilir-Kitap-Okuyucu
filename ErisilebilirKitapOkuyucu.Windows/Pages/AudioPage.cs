@@ -42,9 +42,9 @@ public sealed class AudioPage : PageBase
         Ui.Name(_speed, $"Oynatma hızı {Fmt.Speed(_speed.Value)}");
         Ui.Name(_vol, $"Ses düzeyi %{Math.Round(_vol.Value)}");
 
-        _back = Ui.Button($"{Seek} sn Geri", () => App.Audio.SeekBy(-Seek), "Sol ok");
+        _back = Ui.Button($"{Seek} sn Geri", StepBackward, "Sol ok");
         _play = Ui.Button("Oynat", () => App.Audio.TogglePlayPause(), "Boşluk tuşu. Medya oynat/duraklat tuşu da çalışır", "Oynat", isPrimary: true);
-        _fwd = Ui.Button($"{Seek} sn İleri", () => App.Audio.SeekBy(Seek), "Sağ ok");
+        _fwd = Ui.Button($"{Seek} sn İleri", StepForward, "Sağ ok");
         _prevCh = Ui.Button("Önceki Ayrım", () => ChangeChapter(-1), "Ctrl+Sol ok");
         _nextCh = Ui.Button("Sonraki Ayrım", () => ChangeChapter(1), "Ctrl+Sağ ok");
 
@@ -210,6 +210,71 @@ public sealed class AudioPage : PageBase
         StartChapter(t);
     }
 
+    private void StepBackward()
+    {
+        var seekMs = Seek * 1000L;
+        var currentPos = App.Audio.PositionMs;
+
+        // Çok bölümlü / ZIP sesli kitaplarda ayrımın başına gelindiğinde önceki ayrımın son kısmına geç
+        if (IsZip && _chapter > 0 && currentPos < seekMs)
+        {
+            var prevIndex = _chapter - 1;
+            var prevCh = _book.Chapters[prevIndex];
+            long prevDur = prevCh.DurationMs;
+
+            if (prevDur <= 0 && !string.IsNullOrEmpty(prevCh.UriString) && System.IO.File.Exists(prevCh.UriString))
+            {
+                try
+                {
+                    using var reader = new NAudio.Wave.AudioFileReader(prevCh.UriString);
+                    prevDur = (long)reader.TotalTime.TotalMilliseconds;
+                    prevCh.DurationMs = prevDur;
+                    App.Repo.UpdateZipDuration(_book.Id, prevIndex, prevDur);
+                }
+                catch { }
+            }
+
+            long targetPos = 0;
+            if (prevDur > 0)
+            {
+                long underflow = seekMs - currentPos;
+                targetPos = Math.Max(0, prevDur - underflow);
+            }
+
+            StartChapter(prevIndex, targetPos, announce: true);
+            App.Announce($"Önceki ayrım: {prevCh.Title}, {Fmt.SpokenTime(targetPos)}");
+            return;
+        }
+
+        if (currentPos - seekMs <= 0)
+        {
+            App.Audio.SeekTo(0);
+            App.Announce(IsZip && _chapter == 0 ? "Kitabın başı (00:00)" : "Ayrımın başı (00:00)");
+        }
+        else
+        {
+            App.Audio.SeekBy(-Seek);
+            App.Announce(Fmt.SpokenTime(App.Audio.PositionMs));
+        }
+    }
+
+    private void StepForward()
+    {
+        var seekMs = Seek * 1000L;
+        var currentPos = App.Audio.PositionMs;
+        var dur = App.Audio.DurationMs;
+
+        if (IsZip && dur > 0 && currentPos + seekMs >= dur && _chapter + 1 < _book.Chapters.Count)
+        {
+            long overflow = (currentPos + seekMs) - dur;
+            StartChapter(_chapter + 1, Math.Max(0, overflow), announce: true);
+            return;
+        }
+
+        App.Audio.SeekBy(Seek);
+        App.Announce(Fmt.SpokenTime(App.Audio.PositionMs));
+    }
+
     private void PlaySelectedChapter()
     {
         if ((_chapters.SelectedItem as ListBoxItem)?.Tag is int i) StartChapter(i);
@@ -333,11 +398,11 @@ public sealed class AudioPage : PageBase
         }
         if (ShortcutService.Matches("Audio.SeekBackward", e) && plain)
         {
-            App.Audio.SeekBy(-Seek); App.Announce(Fmt.SpokenTime(App.Audio.PositionMs)); e.Handled = true; return;
+            StepBackward(); e.Handled = true; return;
         }
         if (ShortcutService.Matches("Audio.SeekForward", e) && plain)
         {
-            App.Audio.SeekBy(Seek); App.Announce(Fmt.SpokenTime(App.Audio.PositionMs)); e.Handled = true; return;
+            StepForward(); e.Handled = true; return;
         }
         if (ShortcutService.Matches("Audio.NextChapter", e))
         {
