@@ -63,6 +63,7 @@ public static class ShortcutService
 
         // ---------------------------------------------------- Genel (General)
         new("General.Help", CatGeneral, "Yardım ve Kullanım Kılavuzu", "Detaylı kullanım kılavuzu ve kısayol penceresini açar", Key.F1, ModifierKeys.None),
+        new("General.BookmarkManager", CatGeneral, "Yer İmleri Yöneticisi", "Kütüphanedeki yer imlerini görüntüleme, TXT dışa/içe aktarma penceresini açar", Key.Y, ModifierKeys.Control | ModifierKeys.Shift),
         new("General.Settings", CatGeneral, "Ayarlar Penceresini Aç", "Uygulama ayarlarını açar", Key.OemComma, ModifierKeys.Control),
         new("General.Back", CatGeneral, "Kitaplığa Dön / Kapat", "Açık kitabı kapatır veya önceki ekrana döner", Key.Escape, ModifierKeys.None)
     };

@@ -36,6 +36,7 @@ public sealed class EdgeTtsEngine : ITtsEngine
     private readonly object _lock = new();
 
     private ClientWebSocket? _cachedWs;
+    private DateTime _wsConnectedTime;
     private readonly SemaphoreSlim _wsLock = new(1, 1);
 
     private string? _prefetchedText;
@@ -418,7 +419,12 @@ public sealed class EdgeTtsEngine : ITtsEngine
 
     private async Task<ClientWebSocket> GetConnectedWsAsync(CancellationToken ct)
     {
-        if (_cachedWs != null && _cachedWs.State == WebSocketState.Open) return _cachedWs;
+        // 4 dakikadan eski bağlantıları veya kapanmış soketleri tazele (Sec-MS-GEC 5 dakikalık periyot kullanır)
+        if (_cachedWs != null && _cachedWs.State == WebSocketState.Open &&
+            (DateTime.UtcNow - _wsConnectedTime).TotalMinutes < 4.0)
+        {
+            return _cachedWs;
+        }
 
         try { _cachedWs?.Dispose(); } catch { }
         _cachedWs = new ClientWebSocket();
@@ -438,13 +444,14 @@ public sealed class EdgeTtsEngine : ITtsEngine
         string wssUrl = $"wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken={TrustedClientToken}&ConnectionId={connectId}&Sec-MS-GEC={token}&Sec-MS-GEC-Version={SecMsGecVersion}";
 
         using var connCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        connCts.CancelAfter(TimeSpan.FromSeconds(12));
+        connCts.CancelAfter(TimeSpan.FromSeconds(20));
         await _cachedWs.ConnectAsync(new Uri(wssUrl), connCts.Token);
 
         var speechConfig = "{\"context\":{\"synthesis\":{\"audio\":{\"metadataoptions\":{\"sentenceBoundaryEnabled\":\"false\",\"wordBoundaryEnabled\":\"false\"},\"outputFormat\":\"audio-24khz-48kbitrate-mono-mp3\"}}}}";
         var configMsg = $"X-Timestamp:{GetDateString()}\r\nContent-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n{speechConfig}\r\n";
         await _cachedWs.SendAsync(new ArraySegment<byte>(Encoding.UTF8.GetBytes(configMsg)), WebSocketMessageType.Text, true, ct);
 
+        _wsConnectedTime = DateTime.UtcNow;
         return _cachedWs;
     }
 
@@ -473,7 +480,7 @@ public sealed class EdgeTtsEngine : ITtsEngine
             while (ws.State == WebSocketState.Open && !turnEnd && !ct.IsCancellationRequested)
             {
                 using var readCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                readCts.CancelAfter(TimeSpan.FromSeconds(12));
+                readCts.CancelAfter(TimeSpan.FromSeconds(30));
 
                 using var msgMs = new MemoryStream();
                 WebSocketReceiveResult res;
@@ -529,6 +536,48 @@ public sealed class EdgeTtsEngine : ITtsEngine
         }
     }
 
+    private async Task<byte[]> SynthesizeWithRetryAsync(string text, string voice, float rate, float pitch, CancellationToken ct)
+    {
+        int maxAttempts = 3;
+        Exception? lastEx = null;
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            ct.ThrowIfCancellationRequested();
+            try
+            {
+                return await SynthesizeMp3Async(text, voice, rate, pitch, ct);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                lastEx = ex;
+                AppPaths.Log($"Edge TTS deneme {attempt}/{maxAttempts} başarısız ('{voice}'): {ex.Message}. Bağlantı sıfırlanıyor...");
+
+                await _wsLock.WaitAsync(ct);
+                try
+                {
+                    try { _cachedWs?.Dispose(); } catch { }
+                    _cachedWs = null;
+                }
+                finally
+                {
+                    _wsLock.Release();
+                }
+
+                if (attempt < maxAttempts)
+                {
+                    await Task.Delay(200 * attempt, ct);
+                }
+            }
+        }
+
+        throw lastEx ?? new InvalidOperationException($"'{voice}' ses sunucusuna bağlanılamadı.");
+    }
+
     public Task SpeakAsync(string text, string? voiceId, float rate, float pitch, CancellationToken ct) => SpeakAsync(text, voiceId, rate, pitch, 1.0f, ct);
 
     public async Task SpeakAsync(string text, string? voiceId, float rate, float pitch, float volume, CancellationToken ct)
@@ -554,12 +603,21 @@ public sealed class EdgeTtsEngine : ITtsEngine
             if (existingTask != null)
             {
                 AppPaths.Log($"Edge TTS: '{selectedVoice}' için önceden hazırlanan ses kullanılıyor (anında oynatma)...");
-                mp3Data = await existingTask;
+                try
+                {
+                    mp3Data = await existingTask;
+                }
+                catch (Exception pex)
+                {
+                    AppPaths.Log($"Edge TTS: Önceden hazırlanan ses görevi başarısız oldu ({pex.Message}), canlı sentezlemeye geçiliyor...");
+                    mp3Data = null;
+                }
             }
-            else
+
+            if (mp3Data == null || mp3Data.Length == 0)
             {
-                AppPaths.Log($"Edge TTS: '{selectedVoice}' ile sentezleniyor (metin: {text.Length} karakter)...");
-                mp3Data = await SynthesizeMp3Async(text, selectedVoice, rate, pitch, ct);
+                AppPaths.Log($"Edge TTS: '{selectedVoice}' ile canlı sentezleniyor (metin: {text.Length} karakter)...");
+                mp3Data = await SynthesizeWithRetryAsync(text, selectedVoice, rate, pitch, ct);
             }
 
             if (mp3Data == null || mp3Data.Length == 0)
@@ -603,8 +661,24 @@ public sealed class EdgeTtsEngine : ITtsEngine
         }
         catch (Exception ex)
         {
-            AppPaths.Log($"Edge TTS hatası ('{selectedVoice}'): {ex.Message}. Yerel OneCore sesine geçiliyor.");
-            await _fallbackEngine.SpeakAsync(text, null, rate, pitch, ct);
+            AppPaths.Log($"Edge TTS hatası ('{selectedVoice}'): {ex.Message}.");
+            if (selectedVoice.StartsWith("az-", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    AppPaths.Log("Edge TTS: Azerbaycan dili için çevrim dışı Meta MMS sesine geçiliyor...");
+                    using var sherpa = new SherpaTtsEngine();
+                    await sherpa.SpeakAsync(text, "meta-mms-azj", rate, pitch, volume, ct);
+                    return;
+                }
+                catch (Exception mex)
+                {
+                    AppPaths.Log($"Edge TTS Meta MMS fallback hatası: {mex.Message}");
+                }
+            }
+
+            AppPaths.Log("Edge TTS: Yerel OneCore sesine geçiliyor.");
+            await _fallbackEngine.SpeakAsync(text, null, rate, pitch, volume, ct);
         }
     }
 
@@ -612,7 +686,28 @@ public sealed class EdgeTtsEngine : ITtsEngine
     {
         string selectedVoice = !string.IsNullOrWhiteSpace(voiceId) ? voiceId : "tr-TR-EmelNeural";
 
-        byte[] mp3Data = await SynthesizeMp3Async(text, selectedVoice, rate, pitch, ct);
+        byte[] mp3Data;
+        try
+        {
+            mp3Data = await SynthesizeWithRetryAsync(text, selectedVoice, rate, pitch, ct);
+        }
+        catch (Exception ex)
+        {
+            AppPaths.Log($"Edge TTS WAV hatası ('{selectedVoice}'): {ex.Message}");
+            if (selectedVoice.StartsWith("az-", StringComparison.OrdinalIgnoreCase))
+            {
+                try
+                {
+                    using var sherpa = new SherpaTtsEngine();
+                    await sherpa.SynthesizeToWavAsync(text, "meta-mms-azj", rate, pitch, path, ct);
+                    return;
+                }
+                catch { }
+            }
+            await _fallbackEngine.SynthesizeToWavAsync(text, null, rate, pitch, path, ct);
+            return;
+        }
+
         if (mp3Data.Length == 0)
         {
             await _fallbackEngine.SynthesizeToWavAsync(text, null, rate, pitch, path, ct);

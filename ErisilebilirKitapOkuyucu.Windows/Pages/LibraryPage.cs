@@ -125,6 +125,7 @@ public sealed class LibraryPage : PageBase
             if (e.Key == Key.Delete) { e.Handled = true; RemoveSelected(); return; }
             if (e.Key == Key.I && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; ShowInfo(); return; }
             if (e.Key == Key.M && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; MoveSelected(); return; }
+            if (e.Key == Key.Y && Keyboard.Modifiers == (ModifierKeys.Control | ModifierKeys.Shift)) { e.Handled = true; OpenBookmarkManager(); return; }
         };
         _books.ContextMenu = BuildContextMenu();
         right.Children.Add(_books);
@@ -216,6 +217,13 @@ public sealed class LibraryPage : PageBase
                 {
                     FocusBookItem();
                 }
+            }
+
+            if (ShortcutService.Matches("General.BookmarkManager", e))
+            {
+                e.Handled = true;
+                OpenBookmarkManager();
+                return;
             }
         };
 
@@ -313,6 +321,8 @@ public sealed class LibraryPage : PageBase
         _mTools = MMenu("_Araçlar",
             mNowPlaying,
             MItem("_Son Okunan Kitabı Aç", OpenLastReadBook),
+            MItem("_Yer İmleri Yöneticisi...", OpenBookmarkManager, "Ctrl+Shift+Y"),
+            new Separator(),
             MItem("Kitaplığı _Yenile", () => RefreshBooks(null), "F5")
         );
         _mTools.SubmenuOpened += (_, _) =>
@@ -478,6 +488,32 @@ public sealed class LibraryPage : PageBase
         }
     }
 
+    private void OpenBookmarkManager()
+    {
+        var selBook = Selected;
+        var dlg = new BookmarkManagerDialog(Window.GetWindow(this), selBook?.Id);
+        if (dlg.ShowDialog() == true && dlg.ShouldOpenBook && dlg.SelectedBook is { } book)
+        {
+            if (dlg.SelectedBookmark is { } bm)
+            {
+                if (book.Type == BookType.AUDIO)
+                {
+                    book.CurrentPositionMs = bm.PositionMs;
+                }
+                else
+                {
+                    book.CurrentPage = bm.PageNumber;
+                }
+                App.Repo.Save();
+            }
+            Host.OpenBook(book);
+        }
+        else
+        {
+            Refresh(Selected?.Id);
+        }
+    }
+
     private void SetTheme(string theme)
     {
         var s = App.Repo.Settings;
@@ -552,7 +588,11 @@ public sealed class LibraryPage : PageBase
     {
         var m = new ContextMenu();
         void Add(string h, Action a) { var i = new MenuItem { Header = h }; i.Click += (_, _) => a(); m.Items.Add(i); }
-        Add("Aç", OpenSelected); Add("Kitap Bilgisi", ShowInfo); Add("Klasöre Taşı", MoveSelected); Add("Kitaplıktan Kaldır", RemoveSelected);
+        Add("Aç", OpenSelected);
+        Add("Kitap Bilgisi", ShowInfo);
+        Add("Yer İmleri Yöneticisi", OpenBookmarkManager);
+        Add("Klasöre Taşı", MoveSelected);
+        Add("Kitaplıktan Kaldır", RemoveSelected);
         return m;
     }
 

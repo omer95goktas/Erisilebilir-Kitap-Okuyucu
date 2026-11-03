@@ -1,5 +1,6 @@
 using System.IO;
 using System.Media;
+using System.Text;
 using System.Windows;
 using System.Windows.Automation;
 using System.Windows.Controls;
@@ -271,6 +272,8 @@ public sealed class BookmarksDialog : DialogBase
         Body.Children.Add(ButtonRow(
             Btn("Git", (_, _) => Go(), true),
             Btn("Notu Kopyala", (_, _) => CopyNote(), help: "Seçili notu veya alıntıyı panoya kopyalar (Ctrl+C)"),
+            Btn("Dışa Aktar (.txt)...", (_, _) => BookmarkService.ExportWithDialog(this, _book), help: "Bu kitaptaki yer imlerini TXT dosyası olarak dışa aktarır"),
+            Btn("İçe Aktar (.txt)...", (_, _) => { if (BookmarkService.ImportWithDialog(this, App.Repo, _book) > 0) Refresh(); }, help: "TXT dosyasındaki yer imlerini bu kitaba yükler"),
             Btn("Sil", (_, _) => Remove(), help: "Seçili yer imini siler (Delete tuşu)"),
             Btn("Kapat", (_, _) => DialogResult = false)));
         Loaded += (_, _) => Dispatcher.BeginInvoke(() => { if (_list.Items.Count > 0) (_list.ItemContainerGenerator.ContainerFromIndex(0) as ListBoxItem)?.Focus(); else _list.Focus(); }, DispatcherPriority.Input);
@@ -329,6 +332,225 @@ public sealed class BookmarksDialog : DialogBase
         Refresh();
         if (_list.Items.Count > 0) _list.SelectedIndex = Math.Min(idx, _list.Items.Count - 1);
         App.Announce("Yer imi silindi");
+        (_list.ItemContainerGenerator.ContainerFromIndex(Math.Max(0, _list.SelectedIndex)) as ListBoxItem)?.Focus();
+    }
+}
+
+public sealed class BookmarkManagerDialog : DialogBase
+{
+    private readonly ComboBox _bookCombo = new() { Margin = new Thickness(0, 4, 0, 10), MinHeight = 32 };
+    private readonly TextBlock _infoText = new() { Margin = new Thickness(0, 0, 0, 8), FontWeight = FontWeights.SemiBold };
+    private readonly ListBox _list = new() { MaxHeight = 360, MinHeight = 140 };
+    private List<BookItem> _books = new();
+
+    public Bookmark? SelectedBookmark { get; private set; }
+    public BookItem? SelectedBook { get; private set; }
+    public bool ShouldOpenBook { get; private set; }
+
+    public BookmarkManagerDialog(Window? owner, string? initialBookId = null) : base(owner, "Yer İmleri Yöneticisi", 720)
+    {
+        AutomationProperties.SetName(_bookCombo, "Kitap seçimi");
+        AutomationProperties.SetHelpText(_bookCombo, "Yer imlerini görüntülemek ve yönetmek istediğiniz kitabı seçin");
+
+        AutomationProperties.SetName(_list, "Yer imleri ve notlar listesi");
+        _list.MouseDoubleClick += (_, _) => OpenSelectedBookmark();
+        _list.PreviewKeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter) { e.Handled = true; OpenSelectedBookmark(); }
+            else if (e.Key == Key.Delete) { e.Handled = true; RemoveSelected(); }
+            else if (e.Key == Key.C && Keyboard.Modifiers == ModifierKeys.Control) { e.Handled = true; CopyNote(); }
+        };
+
+        Body.Children.Add(new TextBlock { Text = "Kitap Seçin:", Margin = new Thickness(0, 4, 0, 2) });
+        Body.Children.Add(_bookCombo);
+        Body.Children.Add(_infoText);
+        Body.Children.Add(_list);
+
+        LoadBooks(initialBookId);
+
+        _bookCombo.SelectionChanged += (_, _) => RefreshList();
+
+        Body.Children.Add(ButtonRow(
+            Btn("Kitapta Aç / Git", (_, _) => OpenSelectedBookmark(), true, help: "Seçili yer iminin bulunduğu kitabı açar"),
+            Btn("Notu Kopyala", (_, _) => CopyNote(), help: "Seçili notu veya alıntıyı panoya kopyalar (Ctrl+C)"),
+            Btn("Dışa Aktar (.txt)...", (_, _) => ExportCurrent(), help: "Seçili kitabın yer imlerini TXT dosyasına kaydeder"),
+            Btn("İçe Aktar (.txt)...", (_, _) => ImportCurrent(), help: "TXT dosyasındaki yer imlerini seçili kitaba ekler"),
+            Btn("Tümünü Dışa Aktar...", (_, _) => ExportAll(), help: "Tüm kitaplardaki yer imlerini tek bir TXT dosyasına yedekler"),
+            Btn("Sil", (_, _) => RemoveSelected(), help: "Seçili yer imini siler (Delete)"),
+            Btn("Kapat", (_, _) => DialogResult = false)
+        ));
+
+        Loaded += (_, _) => Dispatcher.BeginInvoke(() =>
+        {
+            if (_bookCombo.Items.Count > 0) _bookCombo.Focus();
+            else _list.Focus();
+        }, DispatcherPriority.Input);
+    }
+
+    private void LoadBooks(string? selectBookId)
+    {
+        _books = App.Repo.Books.OrderByDescending(x => x.Bookmarks.Count).ThenBy(x => x.Title).ToList();
+        _bookCombo.Items.Clear();
+
+        int selectedIdx = 0;
+        for (int i = 0; i < _books.Count; i++)
+        {
+            var b = _books[i];
+            var countStr = b.Bookmarks.Count > 0 ? $" ({b.Bookmarks.Count} yer imi)" : " (0 yer imi)";
+            var item = new ComboBoxItem
+            {
+                Content = $"{b.Title}{countStr}",
+                Tag = b
+            };
+            AutomationProperties.SetName(item, $"{b.Title}, {b.Bookmarks.Count} yer imi kayıtlı");
+            _bookCombo.Items.Add(item);
+
+            if (!string.IsNullOrEmpty(selectBookId) && b.Id == selectBookId)
+            {
+                selectedIdx = i;
+            }
+        }
+
+        if (_bookCombo.Items.Count > 0)
+        {
+            _bookCombo.SelectedIndex = selectedIdx;
+        }
+        else
+        {
+            _infoText.Text = "Kütüphanenizde henüz kitap bulunmuyor.";
+        }
+    }
+
+    private BookItem? CurrentBook => (_bookCombo.SelectedItem as ComboBoxItem)?.Tag as BookItem;
+    private Bookmark? Selected => (_list.SelectedItem as ListBoxItem)?.Tag as Bookmark;
+
+    private string Describe(BookItem book, Bookmark b)
+    {
+        var where = book.Type == BookType.AUDIO ? Fmt.SpokenTime(b.PositionMs) : $"Sayfa {b.PageNumber}";
+        var s = $"{where} - {b.Title}";
+        if (!string.IsNullOrWhiteSpace(b.Note)) s += $" | Not: {b.Note}";
+        var dateStr = DateTimeOffset.FromUnixTimeMilliseconds(b.CreatedAt).ToLocalTime().ToString("dd.MM.yyyy HH:mm");
+        s += $" ({dateStr})";
+        return s;
+    }
+
+    private void RefreshList()
+    {
+        _list.Items.Clear();
+        var book = CurrentBook;
+        if (book == null)
+        {
+            _infoText.Text = "Lütfen bir kitap seçin.";
+            return;
+        }
+
+        var freshBook = App.Repo.GetBook(book.Id) ?? book;
+        _infoText.Text = $"Seçili Kitap: '{freshBook.Title}' — Toplam {freshBook.Bookmarks.Count} yer imi ve not.";
+
+        foreach (var b in freshBook.Bookmarks.OrderBy(x => x.CreatedAt))
+        {
+            var desc = Describe(freshBook, b);
+            var item = new ListBoxItem { Content = new TextBlock { Text = desc }, Tag = b };
+            AutomationProperties.SetName(item, desc);
+            _list.Items.Add(item);
+        }
+
+        if (_list.Items.Count == 0)
+        {
+            var empty = new ListBoxItem { Content = "Bu kitapta henüz kayıtlı yer imi bulunmuyor.", IsEnabled = false };
+            AutomationProperties.SetName(empty, "Bu kitapta henüz kayıtlı yer imi bulunmuyor.");
+            _list.Items.Add(empty);
+        }
+        else
+        {
+            _list.SelectedIndex = 0;
+        }
+    }
+
+    private void OpenSelectedBookmark()
+    {
+        if (CurrentBook is not { } book || Selected is not { } bm) return;
+        SelectedBook = book;
+        SelectedBookmark = bm;
+        ShouldOpenBook = true;
+        DialogResult = true;
+    }
+
+    private void CopyNote()
+    {
+        if (Selected is not { } b) return;
+        var textToCopy = !string.IsNullOrWhiteSpace(b.Note) ? b.Note : b.Title;
+        try
+        {
+            Clipboard.SetText(textToCopy);
+            App.Announce("Not panoya kopyalandı");
+        }
+        catch (Exception ex)
+        {
+            App.Announce("Kopyalanamadı: " + ex.Message);
+        }
+    }
+
+    private void ExportCurrent()
+    {
+        if (CurrentBook is not { } book) return;
+        BookmarkService.ExportWithDialog(this, book);
+    }
+
+    private void ImportCurrent()
+    {
+        if (CurrentBook is not { } book) return;
+        if (BookmarkService.ImportWithDialog(this, App.Repo, book) > 0)
+        {
+            var curId = book.Id;
+            LoadBooks(curId);
+            RefreshList();
+        }
+    }
+
+    private void ExportAll()
+    {
+        var booksWithBm = _books.Where(x => x.Bookmarks.Count > 0).ToList();
+        if (booksWithBm.Count == 0)
+        {
+            MessageBox.Show("Kütüphanenizdeki kitaplarda kayıtlı yer imi bulunamadı.", "Yer İmleri", MessageBoxButton.OK, MessageBoxImage.Information);
+            return;
+        }
+
+        var dlg = new Microsoft.Win32.SaveFileDialog
+        {
+            Title = "Tüm Yer İmlerini Dışa Aktar",
+            Filter = "Metin Dosyaları (*.txt)|*.txt|Tüm Dosyalar (*.*)|*.*",
+            FileName = "Tum_Kitaplar_Yer_Imleri_Yedegi.txt",
+            DefaultExt = ".txt"
+        };
+
+        if (dlg.ShowDialog(this) == true)
+        {
+            try
+            {
+                var content = BookmarkService.ExportAllToText(_books);
+                File.WriteAllText(dlg.FileName, content, new UTF8Encoding(true));
+                int totalCount = booksWithBm.Sum(x => x.Bookmarks.Count);
+                App.Announce($"{totalCount} yer imi başarıyla dışa aktarıldı.");
+                MessageBox.Show($"Tebrikler!\n{booksWithBm.Count} kitaba ait toplam {totalCount} adet yer imi başarıyla dışa aktarıldı:\n\n{dlg.FileName}", "Toplu Dışa Aktarma Başarılı", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Dışa aktarma sırasında hata oluştu:\n" + ex.Message, "Hata", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
+        }
+    }
+
+    private void RemoveSelected()
+    {
+        if (CurrentBook is not { } book || Selected is not { } bm) return;
+        var idx = _list.SelectedIndex;
+        App.Repo.RemoveBookmark(book.Id, bm.Id);
+        App.Announce("Yer imi silindi");
+        LoadBooks(book.Id);
+        RefreshList();
+        if (_list.Items.Count > 0) _list.SelectedIndex = Math.Min(idx, _list.Items.Count - 1);
         (_list.ItemContainerGenerator.ContainerFromIndex(Math.Max(0, _list.SelectedIndex)) as ListBoxItem)?.Focus();
     }
 }

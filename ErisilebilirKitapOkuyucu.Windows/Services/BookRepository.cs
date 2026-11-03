@@ -72,7 +72,7 @@ public class BookRepository
 
     private void SortBooks() => _data.Books = _data.Books.OrderByDescending(b => b.LastReadTimestamp).ToList();
 
-    private void Save(bool notify = true)
+    public void Save(bool notify = true)
     {
         lock (_lock)
         {

@@ -256,6 +256,41 @@ public static class SelfTest
                              again.Settings.CustomShortcuts.ContainsKey("Reader.NextPage");
         Check("Ayarları İçe Aktarma ve Geri Yükleme", settingsMatch, "Tüm ayarlar ve kısayollar eksiksiz geri yüklendi");
 
+        // Yer İmleri Dışa ve İçe Aktarma Testi (TXT Formatı)
+        var bmBook = new BookItem { Title = "Test Romanı", UriString = f, Type = BookType.TXT, TotalPages = 20 };
+        again.AddBook(bmBook);
+        again.AddBookmark(bmBook.Id, new Bookmark { Title = "Bölüm 1 Giriş", PageNumber = 3, Note = "Burada önemli bir tanım var." });
+        again.AddBookmark(bmBook.Id, new Bookmark { Title = "Doruk Noktası", PageNumber = 12, Note = "Kahramanın kararı." });
+        var targetBook = again.GetBook(bmBook.Id)!;
+        string exportedTxt = BookmarkService.ExportToText(targetBook);
+        Check("Yer İmlerini TXT Olarak Dışa Aktarma",
+            exportedTxt.Contains("ERİŞİLEBİLİR KİTAP OKUYUCU - YER İMLERİ VE NOTLAR") &&
+            exportedTxt.Contains("Test Romanı") &&
+            exportedTxt.Contains("Sayfa: 3") &&
+            exportedTxt.Contains("Burada önemli bir tanım var.") &&
+            exportedTxt.Contains("Sayfa: 12"),
+            $"{exportedTxt.Length} karakter metin üretildi");
+
+        var parsedBms = BookmarkService.ParseBookmarksFromText(exportedTxt, out string? detectedTitle);
+        Check("Yer İmlerini TXT'den İçe Aktarma / Ayrıştırma",
+            parsedBms.Count == 2 && detectedTitle == "Test Romanı" && parsedBms[0].PageNumber == 3 && parsedBms[1].PageNumber == 12,
+            $"{parsedBms.Count} yer imi başarıyla ayrıştırıldı");
+
+        // Toplu dışa aktarma ve içe aktarma testi
+        string allExported = BookmarkService.ExportAllToText(new[] { targetBook });
+        var allParsed = BookmarkService.ParseBookmarksFromText(allExported, out string? _);
+        Check("Toplu Yer İmleri Dışa/İçe Aktarma",
+            allParsed.Count == 2 && allExported.Contains("TOPLU YER"),
+            $"{allParsed.Count} yer imi toplu yedekten başarıyla ayrıştırıldı");
+
+        // Kitaba içe aktarma testi (mükerrer koruması)
+        int reimported = BookmarkService.ImportToBook(again, targetBook.Id, allParsed);
+        Check("Mükerrer Yer İmi Engelleme",
+            reimported == 0 && targetBook.Bookmarks.Count == 2,
+            "Mükerrer yer imleri başarıyla elendi");
+
+        again.RemoveBook(bmBook.Id);
+
         return Task.CompletedTask;
     }
 

@@ -317,6 +317,13 @@ public sealed class TtsService : IDisposable
     {
         if (string.IsNullOrWhiteSpace(text)) return "";
 
+        // 0. Görünmez karakterler, sıfır genişlikli boşluklar ve kontrol karakterlerini temizle
+        text = text.Replace("\u00AD", "")
+                   .Replace("\u200B", "")
+                   .Replace("\u200C", "")
+                   .Replace("\u200D", "")
+                   .Replace("\uFEFF", "");
+
         // 1. Markdown başlık imleri (# ## ###) temizle
         text = Regex.Replace(text, @"^[\s#]+", "");
 

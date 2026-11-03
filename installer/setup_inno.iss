@@ -4,7 +4,7 @@
 ; ===================================================================
 
 #define MyAppName "Erişilebilir Kitap Okuyucu"
-#define MyAppVersion "2.0.0"
+#define MyAppVersion "2.0.1"
 #define MyAppPublisher "omergoktas.net"
 #define MyAppURL "https://omergoktas.net"
 #define MyAppExeName "ErisilebilirKitapOkuyucu.exe"
