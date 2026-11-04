@@ -57,6 +57,10 @@ public class BookRepository
         foreach (var b in _data.Books)
         {
             if (string.IsNullOrWhiteSpace(b.FolderName)) b.FolderName = BookItem.RootFolder;
+            b.Chapters ??= new();
+            b.Bookmarks ??= new();
+            b.Title ??= "";
+            b.UriString ??= "";
             // Son sayfada kalınmışsa baştan başlat (Android davranışı)
             if (b.Type != BookType.AUDIO && b.TotalPages > 1 && b.CurrentPage >= b.TotalPages) b.CurrentPage = 1;
         }

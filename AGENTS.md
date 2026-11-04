@@ -13,3 +13,8 @@
 > 
 > - Uygulamaya eklenen, değiştirilen veya geliştirilen **HER YENİ ÖZELLİK, MENÜ VE KISAYOL**, geliştirme sürecinin ayrılmaz bir parçası olarak **ŞARTSIZ VE İSTİSNASIZ** biçimde uygulamanın dahili **Kullanım Kılavuzu'na (F1 / HelpDialog)** eşzamanlı olarak eklenecek ve güncellenecektir.
 > - Dahili kullanım kılavuzu güncellenmeden hiçbir özellik veya sürüm "tamamlandı" sayılamaz ve kullanıcı onayına sunulamaz.
+
+
+## Sürüm Takip Çizelgesi
+- **Son Yayınlanan Sürüm:** v2.0.3 (04 Kasım 2026 - GitHub & Microsoft Store)
+- **Sıradaki Geliştirilecek Sürüm:** **v2.0.4**

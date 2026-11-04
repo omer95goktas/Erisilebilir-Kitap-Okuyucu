@@ -63,22 +63,45 @@ public class BookItem
     {
         get
         {
-            if (Type == BookType.AUDIO)
+            try
             {
-                if (IsZipArchive && Chapters.Count > 0)
+                if (Type == BookType.AUDIO)
                 {
-                    var idx = Math.Clamp(CurrentChapterIndex, 0, Chapters.Count - 1);
-                    return $"{TypeLabel}, {Chapters.Count} ayrım, şu an: {Chapters[idx].Title}, {Fmt.Time(CurrentPositionMs)}";
+                    if (IsZipArchive && Chapters != null && Chapters.Count > 0)
+                    {
+                        var idx = Math.Clamp(CurrentChapterIndex, 0, Chapters.Count - 1);
+                        var chapterTitle = (idx >= 0 && idx < Chapters.Count && Chapters[idx] != null)
+                            ? (Chapters[idx].Title ?? $"Ayrım {idx + 1}")
+                            : $"Ayrım {idx + 1}";
+                        return $"{TypeLabel}, {Chapters.Count} ayrım, şu an: {chapterTitle}, {Fmt.Time(CurrentPositionMs)}";
+                    }
+                    return $"{TypeLabel}, kaldığınız yer {Fmt.Time(CurrentPositionMs)}" +
+                           (TotalDurationMs > 0 ? $" / {Fmt.Time(TotalDurationMs)}" : "");
                 }
-                return $"{TypeLabel}, kaldığınız yer {Fmt.Time(CurrentPositionMs)}" +
-                       (TotalDurationMs > 0 ? $" / {Fmt.Time(TotalDurationMs)}" : "");
+                return $"{TypeLabel}, sayfa {CurrentPage} / {TotalPages}";
             }
-            return $"{TypeLabel}, sayfa {CurrentPage} / {TotalPages}";
+            catch
+            {
+                return TypeLabel;
+            }
         }
     }
 
     [JsonIgnore]
-    public string AccessibleName => $"{Title}, {Summary}";
+    public string AccessibleName
+    {
+        get
+        {
+            try
+            {
+                return $"{Title ?? "Kitap"}, {Summary}";
+            }
+            catch
+            {
+                return Title ?? "Kitap";
+            }
+        }
+    }
 }
 
 public class AppSettings

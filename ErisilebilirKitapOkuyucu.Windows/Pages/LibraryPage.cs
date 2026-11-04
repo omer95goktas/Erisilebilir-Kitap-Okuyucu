@@ -669,60 +669,67 @@ public sealed class LibraryPage : PageBase
 
         foreach (var b in list)
         {
-            var dock = new DockPanel { LastChildFill = true, Margin = new Thickness(2) };
+            try
+            {
+                var dock = new DockPanel { LastChildFill = true, Margin = new Thickness(2) };
 
-            var badgeColor = b.Type switch
-            {
-                BookType.PDF => "#DC2626",
-                BookType.EPUB => "#16A34A",
-                BookType.DOCX => "#2563EB",
-                BookType.XLSX => "#059669",
-                BookType.AUDIO => "#9333EA",
-                _ => "#475569"
-            };
+                var badgeColor = b.Type switch
+                {
+                    BookType.PDF => "#DC2626",
+                    BookType.EPUB => "#16A34A",
+                    BookType.DOCX => "#2563EB",
+                    BookType.XLSX => "#059669",
+                    BookType.AUDIO => "#9333EA",
+                    _ => "#475569"
+                };
 
-            var badgeBorder = new Border
-            {
-                Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(badgeColor)),
-                CornerRadius = new CornerRadius(5),
-                Padding = new Thickness(6, 2, 6, 2),
-                Margin = new Thickness(0, 0, 10, 0),
-                VerticalAlignment = VerticalAlignment.Center
-            };
-            DockPanel.SetDock(badgeBorder, Dock.Left);
-            badgeBorder.Child = new TextBlock
-            {
-                Text = b.TypeLabel.ToUpperInvariant(),
-                FontSize = 10,
-                FontWeight = FontWeights.Bold,
-                Foreground = Brushes.White,
-                HorizontalAlignment = HorizontalAlignment.Center
-            };
-            dock.Children.Add(badgeBorder);
+                var badgeBorder = new Border
+                {
+                    Background = new SolidColorBrush((Color)ColorConverter.ConvertFromString(badgeColor)),
+                    CornerRadius = new CornerRadius(5),
+                    Padding = new Thickness(6, 2, 6, 2),
+                    Margin = new Thickness(0, 0, 10, 0),
+                    VerticalAlignment = VerticalAlignment.Center
+                };
+                DockPanel.SetDock(badgeBorder, Dock.Left);
+                badgeBorder.Child = new TextBlock
+                {
+                    Text = (b.TypeLabel ?? "").ToUpperInvariant(),
+                    FontSize = 10,
+                    FontWeight = FontWeights.Bold,
+                    Foreground = Brushes.White,
+                    HorizontalAlignment = HorizontalAlignment.Center
+                };
+                dock.Children.Add(badgeBorder);
 
-            var textStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
-            var titleBlock = new TextBlock
-            {
-                Text = b.Title,
-                FontSize = 15,
-                FontWeight = FontWeights.SemiBold,
-                TextTrimming = TextTrimming.CharacterEllipsis,
-                Margin = new Thickness(0, 0, 0, 2)
-            };
-            var summaryBlock = new TextBlock
-            {
-                Text = b.Summary,
-                FontSize = 13,
-                Foreground = (Brush)Application.Current.Resources["SubTextFg"]
-            };
-            textStack.Children.Add(titleBlock);
-            textStack.Children.Add(summaryBlock);
-            dock.Children.Add(textStack);
+                var textStack = new StackPanel { VerticalAlignment = VerticalAlignment.Center };
+                var titleBlock = new TextBlock
+                {
+                    Text = b.Title ?? "",
+                    FontSize = 15,
+                    FontWeight = FontWeights.SemiBold,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                    Margin = new Thickness(0, 0, 0, 2)
+                };
+                var summaryBlock = new TextBlock
+                {
+                    Text = b.Summary ?? "",
+                    FontSize = 13,
+                    Foreground = (Brush)Application.Current.Resources["SubTextFg"]
+                };
+                textStack.Children.Add(titleBlock);
+                textStack.Children.Add(summaryBlock);
+                dock.Children.Add(textStack);
 
-            var item = new ListBoxItem { Content = dock, Tag = b };
-            Ui.Name(item, b.AccessibleName);
-            _books.Items.Add(item);
-            if (b.Id == prevId) item.IsSelected = true;
+                var item = new ListBoxItem { Content = dock, Tag = b };
+                Ui.Name(item, b.AccessibleName ?? b.Title ?? "Kitap");
+                _books.Items.Add(item);
+                if (b.Id == prevId) item.IsSelected = true;
+            }
+            catch (Exception ex)
+            {
+                AppPaths.Log($"RefreshBooks kitap oluşturma hatası ('{b?.Title}'): {ex}");
+            }
         }
         if (_books.SelectedItem == null && _books.Items.Count > 0) _books.SelectedIndex = 0;
 

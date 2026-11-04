@@ -711,30 +711,31 @@ public sealed class HelpDialog : DialogBase
         Height = 460
     };
 
-    public HelpDialog(Window? owner) : base(owner, "Kullanım Kılavuzu ve Klavye Kısayolları", 800)
+    public HelpDialog(Window? owner) : base(owner, $"Kullanım Kılavuzu ve Klavye Kısayolları (v{Services.UpdateService.CurrentVersion})", 800)
     {
-        var html = @"<!DOCTYPE html>
+        var curVer = Services.UpdateService.CurrentVersion;
+        var html = $@"<!DOCTYPE html>
 <html lang=""tr"">
 <head>
 <meta charset=""utf-8"">
 <style>
-  body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 16px; line-height: 1.6; color: #111; background: #fff; padding: 18px; margin: 0; }
-  h1 { font-size: 22px; color: #004d99; border-bottom: 2px solid #004d99; padding-bottom: 6px; margin-top: 0; }
-  h2 { font-size: 18px; color: #1a5276; margin-top: 22px; margin-bottom: 8px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
-  h3 { font-size: 16px; color: #0e3d59; margin-top: 14px; margin-bottom: 6px; }
-  .tip-box { background: #eef6ff; border-left: 5px solid #004d99; padding: 12px; margin: 12px 0; border-radius: 4px; }
-  .feature-box { background: #f4fbf4; border-left: 5px solid #2e7d32; padding: 12px; margin: 12px 0; border-radius: 4px; }
-  ul { list-style-type: square; margin-top: 4px; padding-left: 24px; }
-  li { margin-bottom: 6px; }
-  strong { color: #000; }
-  .badge { background: #004d99; color: #fff; padding: 2px 7px; border-radius: 4px; font-size: 13px; font-weight: bold; }
+  body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; font-size: 16px; line-height: 1.6; color: #111; background: #fff; padding: 18px; margin: 0; }}
+  h1 {{ font-size: 22px; color: #004d99; border-bottom: 2px solid #004d99; padding-bottom: 6px; margin-top: 0; }}
+  h2 {{ font-size: 18px; color: #1a5276; margin-top: 22px; margin-bottom: 8px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }}
+  h3 {{ font-size: 16px; color: #0e3d59; margin-top: 14px; margin-bottom: 6px; }}
+  .tip-box {{ background: #eef6ff; border-left: 5px solid #004d99; padding: 12px; margin: 12px 0; border-radius: 4px; }}
+  .feature-box {{ background: #f4fbf4; border-left: 5px solid #2e7d32; padding: 12px; margin: 12px 0; border-radius: 4px; }}
+  ul {{ list-style-type: square; margin-top: 4px; padding-left: 24px; }}
+  li {{ margin-bottom: 6px; }}
+  strong {{ color: #000; }}
+  .badge {{ background: #004d99; color: #fff; padding: 2px 7px; border-radius: 4px; font-size: 13px; font-weight: bold; }}
 </style>
 </head>
 <body>
-<h1>Erişilebilir Kitap Okuyucu v2.0.2 - Kolay Kullanım Kılavuzu</h1>
+<h1>Erişilebilir Kitap Okuyucu v{curVer} - Kolay Kullanım Kılavuzu</h1>
 
 <div class=""tip-box"">
-  <strong>Hoş Geldiniz!</strong> Bu uygulama; görme engelli dostlarımızın kitapları, PDF'leri, Word belgelerini ve sesli kitapları hiçbir engelle karşılaşmadan en verimli ve bağımsız biçimde okuyup dinleyebilmesi için geliştirilmiştir. Aşağıdaki adımları okuyarak programı ve tüm yeni v2.0.0 özelliklerini kolayca keşfedebilirsiniz.
+  <strong>Hoş Geldiniz!</strong> Bu uygulama; görme engelli dostlarımızın kitapları, PDF'leri, Word belgelerini ve sesli kitapları hiçbir engelle karşılaşmadan en verimli ve bağımsız biçimde okuyup dinleyebilmesi için geliştirilmiştir. Aşağıdaki adımları okuyarak programı ve tüm güncel v{curVer} özelliklerini kolayca keşfedebilirsiniz.
 </div>
 
 <h2>1. Kitap veya Belge Nasıl Eklenir?</h2>
@@ -896,7 +897,7 @@ public sealed class HelpDialog : DialogBase
 
 <h2>Geliştirici ve İletişim</h2>
 <ul>
-  <li><strong>Uygulama:</strong> Erişilebilir Kitap Okuyucu (Windows v2.0.0)</li>
+  <li><strong>Uygulama:</strong> Erişilebilir Kitap Okuyucu (Windows v{curVer})</li>
   <li><strong>Geliştirici:</strong> Ömer Göktaş</li>
   <li><strong>E-Posta:</strong> mail@omergoktas.net</li>
   <li><strong>Web Sitesi:</strong> https://omergoktas.net</li>
